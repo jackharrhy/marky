@@ -1,0 +1,28 @@
+{
+  "name": "marky",
+  "version": "0.1.0",
+  "description": "simple realtime markdown editor",
+  "type": "module",
+  "scripts": {
+    "dev": "NODE_ENV=development tsx watch server.ts",
+    "dev:browser": "esbuild app/assets/entry.tsx --outbase=app/assets --outdir=public/assets --bundle --minify --splitting --format=esm --entry-names='[dir]/[name]' --chunk-names='chunks/[name]-[hash]' --sourcemap --watch",
+    "start": "tsx server.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@remix-run/dom": "jam",
+    "@remix-run/events": "jam",
+    "@remix-run/fetch-router": "^0.8.0",
+    "@remix-run/headers": "^0.14.0",
+    "@remix-run/lazy-file": "^3.6.0",
+    "@remix-run/node-fetch-server": "^0.11.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.0",
+    "esbuild": "^0.25.12",
+    "tsx": "^4.20.6"
+  },
+  "keywords": [],
+  "author": "Jack Arthur Harrhy (me@jackharrhy.com)",
+  "license": "MIT"
+}
