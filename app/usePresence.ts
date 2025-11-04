@@ -5,6 +5,7 @@ import { useState, useEffect } from "react";
 export interface UserPresence {
   name: string;
   color: string;
+  currentFile?: string;
 }
 
 const STORAGE_KEY = "marky-user-presence";

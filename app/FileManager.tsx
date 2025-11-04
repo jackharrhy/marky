@@ -8,11 +8,63 @@ import {
   useEffectEvent,
 } from "react";
 import { YDocProvider } from "@y-sweet/react";
+import { createYjsProvider } from "@y-sweet/client";
+import * as Y from "yjs";
 import { CodeEditor, CodeEditorRef } from "./CodeEditor";
 import { listFiles, readFile, saveFile, createFile } from "./actions";
 import { slugify } from "@/lib/utils";
 import { useLocalPresence } from "./usePresence";
 import { PresenceManager } from "./PresenceManager";
+
+function useGlobalUsersPerFile(globalAwareness: any, files: string[]) {
+  const [usersByFile, setUsersByFile] = useState<
+    Map<string, Array<{ name: string; color: string; clientId: number }>>
+  >(new Map());
+
+  useEffect(() => {
+    if (!globalAwareness) return;
+
+    const updateUsers = () => {
+      const newUsersByFile = new Map<
+        string,
+        Array<{ name: string; color: string; clientId: number }>
+      >();
+
+      files.forEach((file) => {
+        newUsersByFile.set(file, []);
+      });
+
+      globalAwareness.getStates().forEach((state: any, clientId: number) => {
+        const user = state.user;
+        if (user && user.currentFile) {
+          const existing = newUsersByFile.get(user.currentFile) || [];
+          existing.push({
+            name: user.name || "Anonymous",
+            color: user.color || "#aaa",
+            clientId,
+          });
+          newUsersByFile.set(user.currentFile, existing);
+        }
+      });
+
+      setUsersByFile(newUsersByFile);
+    };
+
+    updateUsers();
+
+    const handleChange = () => {
+      updateUsers();
+    };
+
+    globalAwareness.on("update", handleChange);
+
+    return () => {
+      globalAwareness.off("update", handleChange);
+    };
+  }, [globalAwareness, files]);
+
+  return usersByFile;
+}
 
 export function FileManager() {
   const [files, setFiles] = useState<string[]>([]);
@@ -26,6 +78,13 @@ export function FileManager() {
   const [editingColor, setEditingColor] = useState("#000000");
   const editorRef = useRef<CodeEditorRef>(null);
   const { presence, updatePresence } = useLocalPresence();
+  const globalProviderRef = useRef<ReturnType<typeof createYjsProvider> | null>(
+    null
+  );
+  const globalDocRef = useRef<Y.Doc | null>(null);
+  const globalAwarenessRef = useRef<any>(null);
+  const [globalAwareness, setGlobalAwareness] = useState<any>(null);
+  const usersByFile = useGlobalUsersPerFile(globalAwareness, files);
 
   const updateFiles = useEffectEvent(async () => {
     try {
@@ -50,6 +109,32 @@ export function FileManager() {
 
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    const globalDoc = new Y.Doc();
+    const globalProvider = createYjsProvider(globalDoc, "global", "/api/auth");
+    globalProviderRef.current = globalProvider;
+    globalDocRef.current = globalDoc;
+
+    const awareness = globalProvider.awareness;
+    globalAwarenessRef.current = awareness;
+    setGlobalAwareness(awareness);
+
+    return () => {
+      globalProvider.destroy();
+      setGlobalAwareness(null);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (globalAwareness && selectedFile) {
+      globalAwareness.setLocalStateField("user", {
+        name: presence.name,
+        color: presence.color,
+        currentFile: selectedFile,
+      });
+    }
+  }, [presence, selectedFile, globalAwareness]);
 
   const handleEditorReady = useCallback(() => {
     if (selectedFile) {
@@ -269,17 +354,38 @@ export function FileManager() {
               <div className="p-4 text-gray-500">No files found</div>
             ) : (
               <div className="flex flex-col">
-                {files.map((file) => (
-                  <button
-                    key={file}
-                    onClick={() => setSelectedFile(file)}
-                    className={`px-4 py-2 text-left hover:bg-gray-200 ${
-                      selectedFile === file ? "bg-blue-100 font-semibold" : ""
-                    }`}
-                  >
-                    {file.replace(/\.md$/, "")}
-                  </button>
-                ))}
+                {files.map((file) => {
+                  const users = usersByFile.get(file) || [];
+                  return (
+                    <button
+                      key={file}
+                      onClick={() => setSelectedFile(file)}
+                      className={`px-4 py-2 text-left hover:bg-gray-200 flex items-center justify-between ${
+                        selectedFile === file ? "bg-blue-100 font-semibold" : ""
+                      }`}
+                    >
+                      <span>{file.replace(/\.md$/, "")}</span>
+                      {users.length > 0 && (
+                        <div className="flex items-center gap-1 ml-2">
+                          {users.map((user) => (
+                            <div key={user.clientId} className="relative group">
+                              <span
+                                className="inline-block w-3 h-3 rounded-full border border-gray-300 cursor-pointer"
+                                style={{ backgroundColor: user.color }}
+                              />
+                              <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-900 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+                                {user.name}
+                                <div className="absolute top-full left-1/2 transform -translate-x-1/2 -mt-1">
+                                  <div className="border-4 border-transparent border-t-gray-900"></div>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
