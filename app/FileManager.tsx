@@ -144,8 +144,8 @@ export function FileManager() {
 
   async function loadFileContent(filename: string) {
     try {
-      const content = await readFile(filename);
-      if (editorRef.current) {
+      if (editorRef.current && !editorRef.current.hasExistingContent()) {
+        const content = await readFile(filename);
         editorRef.current.setContent(content);
       }
     } catch (error) {

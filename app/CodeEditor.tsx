@@ -1,6 +1,6 @@
 "use client";
 
-import { useAwareness, useText } from "@y-sweet/react";
+import { useAwareness, useText, usePresence } from "@y-sweet/react";
 import { useEffect, useRef, useImperativeHandle } from "react";
 import { EditorView, lineNumbers, keymap } from "@codemirror/view";
 import { EditorState } from "@codemirror/state";
@@ -14,6 +14,7 @@ export interface CodeEditorRef {
   getContent: () => string;
   setContent: (content: string) => void;
   isReady: () => boolean;
+  hasExistingContent: () => boolean;
 }
 
 export interface CodeEditorProps {
@@ -24,6 +25,7 @@ export interface CodeEditorProps {
 export const CodeEditor = ({ ref, onReady }: CodeEditorProps) => {
   const yText = useText("text", { observe: "none" });
   const awareness = useAwareness();
+  const presence = usePresence();
   const editorRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
 
@@ -37,20 +39,33 @@ export const CodeEditor = ({ ref, onReady }: CodeEditorProps) => {
     },
     setContent: (content: string) => {
       if (viewRef.current && yText) {
-        const transaction = viewRef.current.state.update({
-          changes: {
-            from: 0,
-            to: viewRef.current.state.doc.length,
-            insert: content,
-          },
-        });
-        viewRef.current.dispatch(transaction);
-        yText.delete(0, yText.length);
-        yText.insert(0, content);
+        const hasContent = yText.length > 0;
+
+        const otherUsersPresent = Array.from(presence.values()).length > 1;
+
+        if (!hasContent && !otherUsersPresent) {
+          const transaction = viewRef.current.state.update({
+            changes: {
+              from: 0,
+              to: viewRef.current.state.doc.length,
+              insert: content,
+            },
+          });
+          viewRef.current.dispatch(transaction);
+          yText.delete(0, yText.length);
+          yText.insert(0, content);
+        } else {
+          console.log(
+            `Skipping file load: hasContent=${hasContent}, otherUsers=${otherUsersPresent}`
+          );
+        }
       }
     },
     isReady: () => {
       return viewRef.current !== null;
+    },
+    hasExistingContent: () => {
+      return yText ? yText.length > 0 : false;
     },
   }));
 
