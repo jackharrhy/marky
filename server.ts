@@ -2,6 +2,7 @@ import * as http from "node:http";
 import { createRequestListener } from "@remix-run/node-fetch-server";
 
 import { router } from "./app/router.tsx";
+import { handleUpgrade } from "./app/sockets.ts";
 
 let server = http.createServer(
   createRequestListener(async (request) => {
@@ -13,6 +14,18 @@ let server = http.createServer(
     }
   })
 );
+
+server.on("upgrade", (request, socket, head) => {
+  if (
+    !["/ws", "/ws/"].includes(request.url ?? "") ||
+    request.method !== "GET"
+  ) {
+    socket.destroy();
+    return;
+  }
+
+  handleUpgrade(request, socket, head);
+});
 
 let port = process.env.PORT ? parseInt(process.env.PORT, 10) : 44100;
 
