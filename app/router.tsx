@@ -39,7 +39,7 @@ router.map(routes.home, () =>
         />
       </head>
       <body className="bg-base-50 flex flex-col h-full">
-        <div id="root" className="flex-1 p-4 gap-4 flex flex-col" />
+        <div id="root" className="flex-1 flex flex-col" />
       </body>
     </html>
   )
