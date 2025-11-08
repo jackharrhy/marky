@@ -15,36 +15,21 @@ import {
   yXmlFragmentToProseMirrorRootNode,
 } from "y-prosemirror";
 import { plainTextSchema } from "./frontend/schema.js";
-
-// Helper to convert plain text string to ProseMirror doc
-function textToDoc(text: string): ReturnType<typeof plainTextSchema.node> {
-  if (!text) {
-    return plainTextSchema.node("doc", null, [
-      plainTextSchema.node("paragraph"),
-    ]);
-  }
-  const lines = text.split("\n");
-  const paragraphs = lines.map((line) => {
-    if (line === "") {
-      return plainTextSchema.node("paragraph");
-    }
-    return plainTextSchema.node("paragraph", null, [
-      plainTextSchema.text(line),
-    ]);
-  });
-  return plainTextSchema.node("doc", null, paragraphs);
-}
-
-// Helper to convert ProseMirror doc to plain text string
-function docToText(doc: ReturnType<typeof plainTextSchema.node>): string {
-  const paragraphs: string[] = [];
-  doc.forEach((node) => {
-    if (node.type.name === "paragraph") {
-      paragraphs.push(node.textContent);
-    }
-  });
-  return paragraphs.join("\n");
-}
+import { textToDoc, docToText } from "./shared/doc-utils.js";
+import {
+  MESSAGE_TYPE_SYNC,
+  MESSAGE_TYPE_AWARENESS,
+  MESSAGE_TYPE_FILE_LIST,
+  MESSAGE_TYPE_OPEN_FILE,
+  MESSAGE_TYPE_PERSIST_FILE,
+  MESSAGE_TYPE_SUBDOC_SYNC,
+  MESSAGE_TYPE_SUBDOC_AWARENESS,
+} from "./shared/message-types.js";
+import {
+  PROSEMIRROR_FRAGMENT_NAME,
+  MARKDOWN_EXTENSION,
+} from "./shared/constants.js";
+import { log } from "./shared/log.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -64,14 +49,6 @@ interface Client {
 
 const clients = new Set<Client>();
 
-const messageSync = 0;
-const messageAwareness = 1;
-const messageFileList = 2;
-const messageOpenFile = 3;
-const messagePersistFile = 4;
-const messageSubdocSync = 5; // Sync message for subdocuments (includes filename)
-const messageSubdocAwareness = 6; // Awareness message for subdocuments (includes filename)
-
 const wss = new WebSocketServer({ noServer: true });
 
 let currentClientId = 0;
@@ -83,7 +60,7 @@ const filesOnDisk = new Set<string>();
 async function scanContentDirectory() {
   try {
     const files = await fs.readdir(contentDir);
-    const mdFiles = files.filter((f) => f.endsWith(".md"));
+    const mdFiles = files.filter((f) => f.endsWith(MARKDOWN_EXTENSION));
 
     filesOnDisk.clear();
     for (const file of mdFiles) {
@@ -113,7 +90,7 @@ async function scanContentDirectory() {
 
     return Array.from(filesOnDisk);
   } catch (error) {
-    console.error("Error scanning content directory:", error);
+    log.error("Error scanning content directory:", error);
     return [];
   }
 }
@@ -125,7 +102,7 @@ async function loadFileContent(filename: string, subdoc: Y.Doc) {
     const content = await fs.readFile(filePath, "utf-8");
     // Convert plain text to ProseMirror doc and populate XmlFragment
     const doc = textToDoc(content);
-    const xmlFragment = subdoc.getXmlFragment("prosemirror");
+    const xmlFragment = subdoc.getXmlFragment(PROSEMIRROR_FRAGMENT_NAME);
     xmlFragment.delete(0, xmlFragment.length);
     prosemirrorToYXmlFragment(doc, xmlFragment);
   } catch (error) {
@@ -135,11 +112,11 @@ async function loadFileContent(filename: string, subdoc: Y.Doc) {
       filesOnDisk.add(filename);
       // Initialize with empty doc
       const doc = textToDoc("");
-      const xmlFragment = subdoc.getXmlFragment("prosemirror");
+      const xmlFragment = subdoc.getXmlFragment(PROSEMIRROR_FRAGMENT_NAME);
       xmlFragment.delete(0, xmlFragment.length);
       prosemirrorToYXmlFragment(doc, xmlFragment);
     } else {
-      console.error(`Error loading file ${filename}:`, error);
+      log.error(`Error loading file ${filename}:`, error);
     }
   }
 }
@@ -149,14 +126,14 @@ async function persistFileContent(filename: string, subdoc: Y.Doc) {
   const filePath = path.join(contentDir, filename);
   try {
     // Read from XmlFragment and convert to plain text
-    const xmlFragment = subdoc.getXmlFragment("prosemirror");
+    const xmlFragment = subdoc.getXmlFragment(PROSEMIRROR_FRAGMENT_NAME);
     const doc = yXmlFragmentToProseMirrorRootNode(xmlFragment, plainTextSchema);
     const content = docToText(doc);
     await fs.writeFile(filePath, content, "utf-8");
     filesOnDisk.add(filename);
     return true;
   } catch (error) {
-    console.error(`Error persisting file ${filename}:`, error);
+    log.error(`Error persisting file ${filename}:`, error);
     return false;
   }
 }
@@ -164,9 +141,9 @@ async function persistFileContent(filename: string, subdoc: Y.Doc) {
 // Send file list to a client
 function sendFileList(ws: WebSocket) {
   const files = Array.from(filenameToSubdoc.keys());
-  console.log(`Sending file list of ${files.length} files`);
+  log.info(`Sending file list of ${files.length} files`);
   const message = Buffer.concat([
-    Buffer.from([messageFileList]),
+    Buffer.from([MESSAGE_TYPE_FILE_LIST]),
     Buffer.from(JSON.stringify(files)),
   ]);
   ws.send(message);
@@ -179,7 +156,7 @@ rootDoc.on("subdocs", ({ added, removed, loaded }) => {
     filenameToSubdoc.forEach((doc, filename) => {
       if (doc === subdoc) {
         loadFileContent(filename, doc).catch((error) => {
-          console.error(`Error loading content for ${filename}:`, error);
+          log.error(`Error loading content for ${filename}:`, error);
         });
       }
     });
@@ -195,7 +172,7 @@ rootDoc.on("subdocs", ({ added, removed, loaded }) => {
 
 // Initialize: scan directory and create subdocs
 scanContentDirectory().then((files) => {
-  console.log(`Found ${files.length} markdown files in content directory`);
+  log.info(`Found ${files.length} markdown files in content directory`);
 });
 
 // Track which subdocuments each client has loaded
@@ -212,7 +189,7 @@ wss.on("connection", (ws: WebSocket) => {
 
   // Send root doc state
   const syncStep1 = Y.encodeStateAsUpdate(rootDoc);
-  ws.send(Buffer.concat([Buffer.from([messageSync]), syncStep1]));
+  ws.send(Buffer.concat([Buffer.from([MESSAGE_TYPE_SYNC]), syncStep1]));
 
   // Send file list
   sendFileList(ws);
@@ -239,7 +216,7 @@ wss.on("connection", (ws: WebSocket) => {
     const messageType = message[0];
     const content = message.slice(1);
 
-    if (messageType === messageSync) {
+    if (messageType === MESSAGE_TYPE_SYNC) {
       try {
         // Root doc sync
         Y.applyUpdate(rootDoc, content, ws);
@@ -248,14 +225,14 @@ wss.on("connection", (ws: WebSocket) => {
         clients.forEach((client) => {
           if (client.ws !== ws && client.ws.readyState === WebSocket.OPEN) {
             client.ws.send(
-              Buffer.concat([Buffer.from([messageSync]), content])
+              Buffer.concat([Buffer.from([MESSAGE_TYPE_SYNC]), content])
             );
           }
         });
       } catch (error) {
-        console.error("Error applying Yjs update:", error);
+        log.error("Error applying Yjs update:", error);
       }
-    } else if (messageType === messageSubdocSync) {
+    } else if (messageType === MESSAGE_TYPE_SUBDOC_SYNC) {
       try {
         // Subdoc sync - format: [filenameLength (1 byte)][filename][update]
         const filenameLength = content[0];
@@ -277,7 +254,7 @@ wss.on("connection", (ws: WebSocket) => {
             ) {
               client.ws.send(
                 Buffer.concat([
-                  Buffer.from([messageSubdocSync]),
+                  Buffer.from([MESSAGE_TYPE_SUBDOC_SYNC]),
                   Buffer.from([filenameLength]),
                   Buffer.from(filename, "utf-8"),
                   Buffer.from(update),
@@ -287,18 +264,18 @@ wss.on("connection", (ws: WebSocket) => {
           });
         }
       } catch (error) {
-        console.error("Error applying subdoc update:", error);
+        log.error("Error applying subdoc update:", error);
       }
-    } else if (messageType === messageAwareness) {
+    } else if (messageType === MESSAGE_TYPE_AWARENESS) {
       // Root awareness updates are broadcast to all clients
       clients.forEach((client) => {
         if (client.ws !== ws && client.ws.readyState === WebSocket.OPEN) {
           client.ws.send(
-            Buffer.concat([Buffer.from([messageAwareness]), content])
+            Buffer.concat([Buffer.from([MESSAGE_TYPE_AWARENESS]), content])
           );
         }
       });
-    } else if (messageType === messageSubdocAwareness) {
+    } else if (messageType === MESSAGE_TYPE_SUBDOC_AWARENESS) {
       try {
         // Format: [filenameLength (1 byte)][filename][awarenessUpdate]
         const filenameLength = content[0];
@@ -331,7 +308,7 @@ wss.on("connection", (ws: WebSocket) => {
               const filenameBuf = Buffer.from(filename, "utf-8");
               client.ws.send(
                 Buffer.concat([
-                  Buffer.from([messageSubdocAwareness]),
+                  Buffer.from([MESSAGE_TYPE_SUBDOC_AWARENESS]),
                   Buffer.from([filenameBuf.length]),
                   filenameBuf,
                   Buffer.from(awarenessUpdate),
@@ -341,9 +318,9 @@ wss.on("connection", (ws: WebSocket) => {
           });
         }
       } catch (error) {
-        console.error("Error handling subdoc awareness:", error);
+        log.error("Error handling subdoc awareness:", error);
       }
-    } else if (messageType === messageOpenFile) {
+    } else if (messageType === MESSAGE_TYPE_OPEN_FILE) {
       try {
         const filename = content.toString("utf-8");
 
@@ -386,7 +363,7 @@ wss.on("connection", (ws: WebSocket) => {
         const filenameBuf = Buffer.from(filename, "utf-8");
         ws.send(
           Buffer.concat([
-            Buffer.from([messageSubdocSync]),
+            Buffer.from([MESSAGE_TYPE_SUBDOC_SYNC]),
             Buffer.from([filenameBuf.length]),
             filenameBuf,
             Buffer.from(subdocUpdate),
@@ -402,7 +379,7 @@ wss.on("connection", (ws: WebSocket) => {
           if (awarenessUpdate.length > 0) {
             ws.send(
               Buffer.concat([
-                Buffer.from([messageSubdocAwareness]),
+                Buffer.from([MESSAGE_TYPE_SUBDOC_AWARENESS]),
                 Buffer.from([filenameBuf.length]),
                 filenameBuf,
                 Buffer.from(awarenessUpdate),
@@ -425,7 +402,7 @@ wss.on("connection", (ws: WebSocket) => {
               ) {
                 c.ws.send(
                   Buffer.concat([
-                    Buffer.from([messageSubdocSync]),
+                    Buffer.from([MESSAGE_TYPE_SUBDOC_SYNC]),
                     Buffer.from([filenameBuf.length]),
                     filenameBuf,
                     Buffer.from(update),
@@ -438,9 +415,9 @@ wss.on("connection", (ws: WebSocket) => {
           subdocUpdateHandlers.set(subdoc, handler);
         }
       } catch (error) {
-        console.error("Error opening file:", error);
+        log.error("Error opening file:", error);
       }
-    } else if (messageType === messagePersistFile) {
+    } else if (messageType === MESSAGE_TYPE_PERSIST_FILE) {
       try {
         const filename = content.toString("utf-8");
         const subdoc = filenameToSubdoc.get(filename);
@@ -452,10 +429,10 @@ wss.on("connection", (ws: WebSocket) => {
             await scanContentDirectory();
           }
         } else {
-          console.error(`Cannot persist file ${filename}: subdoc not found`);
+          log.error(`Cannot persist file ${filename}: subdoc not found`);
         }
       } catch (error) {
-        console.error("Error persisting file:", error);
+        log.error("Error persisting file:", error);
       }
     }
   });
@@ -471,7 +448,7 @@ wss.on("connection", (ws: WebSocket) => {
   });
 
   ws.on("error", (error) => {
-    console.error("WebSocket error:", { clientId, error });
+    log.error("WebSocket error:", { clientId, error });
     clients.forEach((c) => {
       if (c.ws === ws) {
         clients.delete(c);

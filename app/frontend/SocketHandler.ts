@@ -4,14 +4,16 @@ import {
   applyAwarenessUpdate,
   encodeAwarenessUpdate,
 } from "y-protocols/awareness";
-
-const MESSAGE_TYPE_SYNC = 0;
-const MESSAGE_TYPE_AWARENESS = 1;
-const MESSAGE_TYPE_FILE_LIST = 2;
-const MESSAGE_TYPE_OPEN_FILE = 3;
-const MESSAGE_TYPE_PERSIST_FILE = 4;
-const MESSAGE_TYPE_SUBDOC_SYNC = 5;
-const MESSAGE_TYPE_SUBDOC_AWARENESS = 6;
+import {
+  MESSAGE_TYPE_SYNC,
+  MESSAGE_TYPE_AWARENESS,
+  MESSAGE_TYPE_FILE_LIST,
+  MESSAGE_TYPE_OPEN_FILE,
+  MESSAGE_TYPE_PERSIST_FILE,
+  MESSAGE_TYPE_SUBDOC_SYNC,
+  MESSAGE_TYPE_SUBDOC_AWARENESS,
+} from "../shared/message-types.js";
+import { log } from "../shared/log.js";
 
 export interface SocketHandlerCallbacks {
   onFileListUpdate: (files: string[]) => void;
@@ -102,56 +104,11 @@ export class SocketHandler {
           if (doc === subdoc) {
             this.filenameToSubdoc.set(filename, subdoc);
 
-            // Create awareness instance for this subdoc if it doesn't exist
-            if (!this.filenameToSubdocAwareness.has(filename)) {
-              const subdocAwareness = new Awareness(subdoc);
-              this.filenameToSubdocAwareness.set(filename, subdocAwareness);
-
-              // Set up awareness update handler for this subdoc
-              subdocAwareness.on(
-                "update",
-                ({
-                  added,
-                  updated,
-                  removed,
-                }: {
-                  added: number[];
-                  updated: number[];
-                  removed: number[];
-                }) => {
-                  if (this.ws.readyState === WebSocket.OPEN) {
-                    const changedClients = Array.from(
-                      new Set([...added, ...updated, ...removed])
-                    );
-                    if (changedClients.length > 0) {
-                      const awarenessUpdate = encodeAwarenessUpdate(
-                        subdocAwareness,
-                        changedClients
-                      );
-                      if (awarenessUpdate.length > 0) {
-                        this.sendSubdocAwarenessUpdate(
-                          filename,
-                          awarenessUpdate
-                        );
-                      }
-                    }
-                  }
-                  // Notify callback of subdoc awareness changes
-                  if (this.callbacks.onSubdocAwarenessUpdate) {
-                    this.callbacks.onSubdocAwarenessUpdate(filename);
-                  }
-                }
-              );
-
-              // Set user info in subdoc awareness
-              const currentState = this.awareness.getLocalState();
-              if (currentState && currentState.user) {
-                subdocAwareness.setLocalStateField("user", currentState.user);
-              }
-            }
+            // Set up awareness for this subdoc
+            this.setupSubdocAwareness(filename, subdoc);
 
             // Set up update handler for this subdoc
-            subdoc.on("update", (update: Uint8Array, origin: any) => {
+            subdoc.on("update", (update: Uint8Array, origin: unknown) => {
               // Don't send updates that originate from the subdoc itself (local initialization)
               // Only send updates from user edits (which come from y-prosemirror)
               if (origin !== subdoc) {
@@ -163,6 +120,57 @@ export class SocketHandler {
         });
       });
     });
+  }
+
+  /**
+   * Set up awareness for a subdoc - extracted to avoid duplication
+   */
+  private setupSubdocAwareness(filename: string, subdoc: Y.Doc): void {
+    if (this.filenameToSubdocAwareness.has(filename)) {
+      return; // Already set up
+    }
+
+    const subdocAwareness = new Awareness(subdoc);
+    this.filenameToSubdocAwareness.set(filename, subdocAwareness);
+
+    // Set up awareness update handler for this subdoc
+    subdocAwareness.on(
+      "update",
+      ({
+        added,
+        updated,
+        removed,
+      }: {
+        added: number[];
+        updated: number[];
+        removed: number[];
+      }) => {
+        if (this.ws.readyState === WebSocket.OPEN) {
+          const changedClients = Array.from(
+            new Set([...added, ...updated, ...removed])
+          );
+          if (changedClients.length > 0) {
+            const awarenessUpdate = encodeAwarenessUpdate(
+              subdocAwareness,
+              changedClients
+            );
+            if (awarenessUpdate.length > 0) {
+              this.sendSubdocAwarenessUpdate(filename, awarenessUpdate);
+            }
+          }
+        }
+        // Notify callback of subdoc awareness changes
+        if (this.callbacks.onSubdocAwarenessUpdate) {
+          this.callbacks.onSubdocAwarenessUpdate(filename);
+        }
+      }
+    );
+
+    // Set user info in subdoc awareness
+    const currentState = this.awareness.getLocalState();
+    if (currentState && currentState.user) {
+      subdocAwareness.setLocalStateField("user", currentState.user);
+    }
   }
 
   setAwarenessState(user: { name: string; color: string }) {
@@ -189,7 +197,7 @@ export class SocketHandler {
   }
 
   private handleWebSocketOpen() {
-    console.log("WebSocket connected");
+    log.info("WebSocket connected");
     const awarenessUpdate = encodeAwarenessUpdate(this.awareness, [
       this.awareness.clientID,
     ]);
@@ -202,11 +210,11 @@ export class SocketHandler {
   }
 
   private handleWebSocketError(error: Event) {
-    console.error("WebSocket error:", error);
+    log.error("WebSocket error:", error);
   }
 
   private handleWebSocketClose() {
-    console.log("WebSocket disconnected");
+    log.info("WebSocket disconnected");
     this.awareness.setLocalState(null);
   }
 
@@ -218,7 +226,7 @@ export class SocketHandler {
     } else if (event.data instanceof ArrayBuffer) {
       data = event.data;
     } else {
-      console.warn("received message is neither Blob nor ArrayBuffer", {
+      log.warn("received message is neither Blob nor ArrayBuffer", {
         data: event.data,
       });
       return;
@@ -226,7 +234,7 @@ export class SocketHandler {
 
     const message = new Uint8Array(data);
     if (message.length === 0) {
-      console.warn("received message is empty", { message });
+      log.warn("received message is empty", { message });
       return;
     }
 
@@ -246,7 +254,7 @@ export class SocketHandler {
         const files = JSON.parse(new TextDecoder().decode(content)) as string[];
         this.callbacks.onFileListUpdate(files);
       } catch (error) {
-        console.error("Error parsing file list:", error);
+        log.error("Error parsing file list:", error);
       }
     } else if (messageType === MESSAGE_TYPE_SUBDOC_SYNC) {
       try {
@@ -265,56 +273,11 @@ export class SocketHandler {
             this.filenameToSubdoc.set(filename, subdoc);
             subdoc.load();
 
-            // Create awareness instance for this subdoc if it doesn't exist
-            if (!this.filenameToSubdocAwareness.has(filename)) {
-              const subdocAwareness = new Awareness(subdoc);
-              this.filenameToSubdocAwareness.set(filename, subdocAwareness);
-
-              // Set up awareness update handler for this subdoc
-              subdocAwareness.on(
-                "update",
-                ({
-                  added,
-                  updated,
-                  removed,
-                }: {
-                  added: number[];
-                  updated: number[];
-                  removed: number[];
-                }) => {
-                  if (this.ws.readyState === WebSocket.OPEN) {
-                    const changedClients = Array.from(
-                      new Set([...added, ...updated, ...removed])
-                    );
-                    if (changedClients.length > 0) {
-                      const awarenessUpdate = encodeAwarenessUpdate(
-                        subdocAwareness,
-                        changedClients
-                      );
-                      if (awarenessUpdate.length > 0) {
-                        this.sendSubdocAwarenessUpdate(
-                          filename,
-                          awarenessUpdate
-                        );
-                      }
-                    }
-                  }
-                  // Notify callback of subdoc awareness changes
-                  if (this.callbacks.onSubdocAwarenessUpdate) {
-                    this.callbacks.onSubdocAwarenessUpdate(filename);
-                  }
-                }
-              );
-
-              // Set user info in subdoc awareness
-              const currentState = this.awareness.getLocalState();
-              if (currentState && currentState.user) {
-                subdocAwareness.setLocalStateField("user", currentState.user);
-              }
-            }
+            // Set up awareness for this subdoc
+            this.setupSubdocAwareness(filename, subdoc);
 
             // Set up update handler
-            subdoc.on("update", (update: Uint8Array, origin: any) => {
+            subdoc.on("update", (update: Uint8Array, origin: unknown) => {
               // Don't send updates that originate from the subdoc itself (local initialization)
               // Only send updates from user edits (which come from y-prosemirror)
               if (origin !== subdoc) {
@@ -329,7 +292,7 @@ export class SocketHandler {
           this.callbacks.onSubdocUpdate(filename, subdoc);
         }
       } catch (error) {
-        console.error("Error handling subdoc sync:", error);
+        log.error("Error handling subdoc sync:", error);
       }
     } else if (messageType === MESSAGE_TYPE_SUBDOC_AWARENESS) {
       try {
@@ -349,7 +312,7 @@ export class SocketHandler {
           }
         }
       } catch (error) {
-        console.error("Error handling subdoc awareness:", error);
+        log.error("Error handling subdoc awareness:", error);
       }
     }
   }
@@ -369,15 +332,15 @@ export class SocketHandler {
   }
 
   openFile(filename: string) {
-    console.log("SocketHandler.openFile called with:", filename);
-    console.log("WebSocket readyState:", this.ws.readyState);
+    log.info("SocketHandler.openFile called with:", filename);
+    log.info("WebSocket readyState:", this.ws.readyState);
     const message = new TextEncoder().encode(filename);
     const fullMessage = new Uint8Array(1 + message.length);
     fullMessage[0] = MESSAGE_TYPE_OPEN_FILE;
     fullMessage.set(message, 1);
-    console.log("Sending openFile message, length:", fullMessage.length);
+    log.info("Sending openFile message, length:", fullMessage.length);
     this.ws.send(fullMessage);
-    console.log("Message sent");
+    log.info("Message sent");
   }
 
   persistFile(filename: string) {

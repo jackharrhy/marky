@@ -11,6 +11,7 @@ import { EditorView } from "prosemirror-view";
 import { keymap } from "prosemirror-keymap";
 import { baseKeymap } from "prosemirror-commands";
 import { plainTextSchema } from "./schema";
+import { PROSEMIRROR_FRAGMENT_NAME } from "../shared/constants";
 
 export interface CollaborativeEditorOptions {
   subdoc: Y.Doc;
@@ -29,7 +30,7 @@ export class CollaborativeEditor {
     this.awareness = options.awareness;
 
     // Get or create the XmlFragment for prosemirror sync
-    this.type = this.subdoc.getXmlFragment("prosemirror");
+    this.type = this.subdoc.getXmlFragment(PROSEMIRROR_FRAGMENT_NAME);
 
     // Get the doc from XmlFragment to use as initial doc
     const docFromFragment = yXmlFragmentToProseMirrorRootNode(
@@ -58,7 +59,7 @@ export class CollaborativeEditor {
     }
 
     this.subdoc = subdoc;
-    this.type = this.subdoc.getXmlFragment("prosemirror");
+    this.type = this.subdoc.getXmlFragment(PROSEMIRROR_FRAGMENT_NAME);
 
     // Update awareness if provided
     if (awareness) {
