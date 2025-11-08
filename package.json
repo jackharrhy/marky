@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "NODE_ENV=development tsx watch server.ts",
     "dev:browser": "concurrently -n tailwind,esbuild -c \"bgBlue.bold,bgMagenta.bold\" \"pnpm:dev:tailwind\" \"pnpm:dev:esbuild\"",
-    "dev:tailwind": "tailwindcss -i app/assets/style.css -o public/assets/style.css --watch --map",
+    "dev:tailwind": "tailwindcss -i app/assets/app.css -o public/assets/style.css --watch --map",
     "dev:esbuild": "esbuild app/assets/entry.tsx --outbase=app/assets --outdir=public/assets --bundle --splitting --format=esm --entry-names='[dir]/[name]' --chunk-names='chunks/[name]-[hash]' --sourcemap --watch",
     "start": "tsx server.ts",
     "typecheck": "tsc --noEmit"
