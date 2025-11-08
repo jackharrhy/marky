@@ -5,9 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "NODE_ENV=development tsx watch server.ts",
-    "dev:browser": "pnpm dev:postcss:once && concurrently -n postcss,esbuild -c \"bgBlue.bold,bgMagenta.bold\" \"pnpm:dev:postcss\" \"pnpm:dev:esbuild\"",
-    "dev:postcss:once": "postcss app/assets/**/*.css --base app/assets --dir app/assets --map",
-    "dev:postcss": "postcss app/assets/**/*.css --base app/assets --dir app/assets --watch --map",
+    "dev:browser": "concurrently -n tailwind,esbuild -c \"bgBlue.bold,bgMagenta.bold\" \"pnpm:dev:tailwind\" \"pnpm:dev:esbuild\"",
+    "dev:tailwind": "tailwindcss -i app/assets/style.css -o public/assets/style.css --watch --map",
     "dev:esbuild": "esbuild app/assets/entry.tsx --outbase=app/assets --outdir=public/assets --bundle --splitting --format=esm --entry-names='[dir]/[name]' --chunk-names='chunks/[name]-[hash]' --sourcemap --watch",
     "start": "tsx server.ts",
     "typecheck": "tsc --noEmit"
@@ -31,6 +30,7 @@
     "yjs": "^13.6.27"
   },
   "devDependencies": {
+    "@tailwindcss/cli": "^4.1.17",
     "@tailwindcss/postcss": "^4.1.17",
     "@types/node": "^24.10.0",
     "@types/ws": "^8.18.1",

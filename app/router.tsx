@@ -30,7 +30,7 @@ router.map(routes.home, () =>
         />
         <link
           rel="stylesheet"
-          href={routes.assets.href({ path: "entry.css" })}
+          href={routes.assets.href({ path: "style.css" })}
         />
       </head>
       <body>
