@@ -1,0 +1,74 @@
+import { oklch, formatHex } from "culori";
+
+const welshFlowers = [
+  "Daffodil",
+  "Leek",
+  "Bluebell",
+  "Primrose",
+  "Foxglove",
+  "Buttercup",
+  "Clover",
+  "Heather",
+  "Gorse",
+  "Hawthorn",
+  "Blackthorn",
+  "Violet",
+  "Snowdrop",
+  "Poppy",
+  "Thistle",
+  "Lily",
+  "Dandelion",
+  "Honeysuckle",
+  "Fern",
+  "Cornflower",
+];
+
+const oklchToRgb = (oklchStr: string): string => {
+  try {
+    const color = oklch(oklchStr.trim());
+    if (!color) return oklchStr.trim();
+    return formatHex(color);
+  } catch {
+    return oklchStr.trim();
+  }
+};
+
+function pickRandomColor() {
+  const rootStyles = getComputedStyle(document.documentElement);
+  const colorVars = [
+    "--color-blue-500",
+    "--color-blue-600",
+    "--color-cyan-600",
+    "--color-green-500",
+    "--color-green-600",
+    "--color-yellow-600",
+    "--color-orange-600",
+    "--color-red-600",
+    "--color-purple-600",
+    "--color-magenta-600",
+  ];
+  const colors = colorVars
+    .map((v) => oklchToRgb(rootStyles.getPropertyValue(v).trim()))
+    .filter(Boolean);
+  if (!colors.length) return "red";
+  const idx = Math.floor(Math.random() * colors.length);
+  return colors[idx];
+}
+
+export function getUser(): { name: string; color: string } {
+  const stored = localStorage.getItem("user");
+  if (stored) {
+    try {
+      return JSON.parse(stored);
+    } catch {
+      console.error(
+        "Failed to parse user from localStorage, falling back to default"
+      );
+    }
+  }
+
+  const randomName =
+    welshFlowers[Math.floor(Math.random() * welshFlowers.length)];
+
+  return { name: `Anonymous ${randomName}`, color: pickRandomColor() };
+}

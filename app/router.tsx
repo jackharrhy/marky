@@ -1,10 +1,15 @@
+import type { Remix } from "@remix-run/dom";
+import { renderToStream } from "@remix-run/dom/server";
+import { html } from "@remix-run/fetch-router/response-helpers";
 import { createRouter } from "@remix-run/fetch-router";
 import { logger } from "@remix-run/fetch-router/logger-middleware";
 
 import { routes } from "../routes.ts";
-
 import * as publicHandlers from "./public.ts";
-import { render } from "./utils/render.ts";
+
+function render(element: Remix.RemixElement, init?: ResponseInit) {
+  return html(renderToStream(element), init);
+}
 
 let middleware = [];
 
