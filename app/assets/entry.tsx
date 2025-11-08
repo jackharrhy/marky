@@ -14,7 +14,6 @@ const welshFlowers = [
   "Gorse",
   "Hawthorn",
   "Blackthorn",
-  "Wild Rose",
   "Violet",
   "Snowdrop",
   "Poppy",
