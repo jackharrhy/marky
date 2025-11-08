@@ -85,9 +85,9 @@ function App(this: Remix.Handle) {
 
   return () => (
     <>
-      <h1>marky</h1>
+      <h1 className="font-bold text-center">marky</h1>
       <div
-        className="editor-container"
+        className="p-4 border border-base-200 rounded-lg"
         on={[
           connect((event) => {
             editor.handleEditorConnect(event);
