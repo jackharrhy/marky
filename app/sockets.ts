@@ -13,6 +13,7 @@ interface Client {
 const clients = new Set<Client>();
 
 const messageSync = 0;
+const messageAwareness = 1;
 
 const wss = new WebSocketServer({ noServer: true });
 
@@ -55,6 +56,14 @@ wss.on("connection", (ws: WebSocket) => {
       } catch (error) {
         console.error("Error applying Yjs update:", error);
       }
+    } else if (messageType === messageAwareness) {
+      clients.forEach((client) => {
+        if (client.ws !== ws && client.ws.readyState === WebSocket.OPEN) {
+          client.ws.send(
+            Buffer.concat([Buffer.from([messageAwareness]), content])
+          );
+        }
+      });
     }
   });
 

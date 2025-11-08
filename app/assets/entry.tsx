@@ -1,18 +1,34 @@
 import { createRoot, connect, type Remix } from "@remix-run/dom";
 import * as Y from "yjs";
-import { ySyncPlugin, yUndoPlugin } from "y-prosemirror";
+import {
+  Awareness,
+  applyAwarenessUpdate,
+  encodeAwarenessUpdate,
+} from "y-protocols/awareness";
+import { ySyncPlugin, yUndoPlugin, yCursorPlugin } from "y-prosemirror";
 import { schema } from "prosemirror-schema-basic";
 import { EditorState } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
+import { keymap } from "prosemirror-keymap";
+import { baseKeymap } from "prosemirror-commands";
 
 import "./style.css";
+import "./cursors.css";
 import "prosemirror-view/style/prosemirror.css";
 
 const MESSAGE_TYPE_SYNC = 0;
+const MESSAGE_TYPE_AWARENESS = 1;
 
 function App(this: Remix.Handle) {
   const ydoc = new Y.Doc();
   const type = ydoc.getXmlFragment("prosemirror");
+
+  const awareness = new Awareness(ydoc);
+  const clientId = Math.random().toString(36).substring(2, 15);
+  awareness.setLocalStateField("user", {
+    name: `User ${clientId.substring(0, 6)}`,
+    color: `#${Math.floor(Math.random() * 16777215).toString(16)}`,
+  });
 
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const wsUrl = `${protocol}//${window.location.host}/ws`;
@@ -22,6 +38,15 @@ function App(this: Remix.Handle) {
 
   ws.onopen = () => {
     console.log("WebSocket connected");
+    const awarenessUpdate = encodeAwarenessUpdate(awareness, [
+      awareness.clientID,
+    ]);
+    if (awarenessUpdate.length > 0) {
+      const message = new Uint8Array(1 + awarenessUpdate.length);
+      message[0] = MESSAGE_TYPE_AWARENESS;
+      message.set(awarenessUpdate, 1);
+      ws.send(message);
+    }
   };
 
   ws.onerror = (error) => {
@@ -30,6 +55,7 @@ function App(this: Remix.Handle) {
 
   ws.onclose = () => {
     console.log("WebSocket disconnected");
+    awareness.setLocalState(null);
   };
 
   ws.onmessage = async (event: MessageEvent) => {
@@ -60,6 +86,8 @@ function App(this: Remix.Handle) {
 
     if (messageType === MESSAGE_TYPE_SYNC) {
       Y.applyUpdate(ydoc, content);
+    } else if (messageType === MESSAGE_TYPE_AWARENESS) {
+      applyAwarenessUpdate(awareness, content, null);
     }
   };
 
@@ -75,9 +103,45 @@ function App(this: Remix.Handle) {
     }
   });
 
+  awareness.on(
+    "update",
+    ({
+      added,
+      updated,
+      removed,
+    }: {
+      added: number[];
+      updated: number[];
+      removed: number[];
+    }) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        const changedClients = Array.from(
+          new Set([...added, ...updated, ...removed])
+        );
+        if (changedClients.length > 0) {
+          const awarenessUpdate = encodeAwarenessUpdate(
+            awareness,
+            changedClients
+          );
+          if (awarenessUpdate.length > 0) {
+            const message = new Uint8Array(1 + awarenessUpdate.length);
+            message[0] = MESSAGE_TYPE_AWARENESS;
+            message.set(awarenessUpdate, 1);
+            ws.send(message);
+          }
+        }
+      }
+    }
+  );
+
   const editorState = EditorState.create({
     schema,
-    plugins: [ySyncPlugin(type), yUndoPlugin()],
+    plugins: [
+      ySyncPlugin(type),
+      yUndoPlugin(),
+      yCursorPlugin(awareness),
+      keymap(baseKeymap),
+    ],
   });
 
   let view: EditorView | null = null;
@@ -85,14 +149,13 @@ function App(this: Remix.Handle) {
   return () => (
     <>
       <div className="editor-wrapper">
-        <h1>Collaborative Editor</h1>
+        <h1>marky</h1>
         <div
           className="editor-container"
           on={[
             connect((event) => {
               const el = event.currentTarget;
               if (!view) {
-                // Create editor view when element connects to DOM
                 view = new EditorView(el, {
                   state: editorState,
                   dispatchTransaction(transaction) {
