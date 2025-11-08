@@ -5,7 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "NODE_ENV=development tsx watch server.ts",
-    "dev:browser": "esbuild app/assets/entry.tsx --outbase=app/assets --outdir=public/assets --bundle --splitting --format=esm --entry-names='[dir]/[name]' --chunk-names='chunks/[name]-[hash]' --sourcemap --watch",
+    "dev:browser": "pnpm dev:postcss:once && concurrently -n postcss,esbuild -c \"bgBlue.bold,bgMagenta.bold\" \"pnpm:dev:postcss\" \"pnpm:dev:esbuild\"",
+    "dev:postcss:once": "postcss app/assets/**/*.css --base app/assets --dir app/assets --map",
+    "dev:postcss": "postcss app/assets/**/*.css --base app/assets --dir app/assets --watch --map",
+    "dev:esbuild": "esbuild app/assets/entry.tsx --outbase=app/assets --outdir=public/assets --bundle --splitting --format=esm --entry-names='[dir]/[name]' --chunk-names='chunks/[name]-[hash]' --sourcemap --watch",
     "start": "tsx server.ts",
     "typecheck": "tsc --noEmit"
   },
@@ -28,9 +31,14 @@
     "yjs": "^13.6.27"
   },
   "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.17",
     "@types/node": "^24.10.0",
     "@types/ws": "^8.18.1",
+    "concurrently": "^9.2.1",
     "esbuild": "^0.25.12",
+    "postcss": "^8.5.6",
+    "postcss-cli": "^11.0.1",
+    "tailwindcss": "^4.1.17",
     "tsx": "^4.20.6"
   },
   "keywords": [],

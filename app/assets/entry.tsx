@@ -59,7 +59,6 @@ function App(this: Remix.Handle) {
   };
 
   ws.onmessage = async (event: MessageEvent) => {
-    console.log("received message", { event });
     let data: ArrayBuffer;
 
     if (event.data instanceof Blob) {
@@ -81,8 +80,6 @@ function App(this: Remix.Handle) {
 
     const messageType = message[0];
     const content = message.slice(1);
-
-    console.log({ messageType, content });
 
     if (messageType === MESSAGE_TYPE_SYNC) {
       Y.applyUpdate(ydoc, content);
@@ -165,7 +162,6 @@ function App(this: Remix.Handle) {
                     }
                   },
                 });
-                console.log({ view });
               }
             }),
           ]}

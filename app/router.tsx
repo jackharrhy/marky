@@ -22,7 +22,7 @@ router.map(routes.home, () =>
       <head>
         <meta charSet="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>Remix v3 Maplibre</title>
+        <title>marky</title>
         <script
           type="module"
           async
@@ -32,7 +32,6 @@ router.map(routes.home, () =>
           rel="stylesheet"
           href={routes.assets.href({ path: "entry.css" })}
         />
-        <style innerHTML={``} />
       </head>
       <body>
         <div id="root" />

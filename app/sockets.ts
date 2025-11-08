@@ -24,7 +24,6 @@ wss.on("connection", (ws: WebSocket) => {
 
   const clientId = currentClientId;
 
-  console.log("new client connected", { clientId });
   const client = { ws, id: clientId };
   clients.add(client);
 
@@ -40,14 +39,9 @@ wss.on("connection", (ws: WebSocket) => {
     if (messageType === messageSync) {
       try {
         Y.applyUpdate(ydoc, content);
-        console.log("applied update", { clientId });
 
         clients.forEach((client) => {
           if (client.ws !== ws && client.ws.readyState === WebSocket.OPEN) {
-            console.log("sending update to client", {
-              fromClientId: clientId,
-              toClientId: client.id,
-            });
             client.ws.send(
               Buffer.concat([Buffer.from([messageSync]), content])
             );
@@ -68,7 +62,6 @@ wss.on("connection", (ws: WebSocket) => {
   });
 
   ws.on("close", () => {
-    console.log("client disconnected", { clientId });
     clients.forEach((c) => {
       if (c.ws === ws) {
         clients.delete(c);
