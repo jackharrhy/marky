@@ -1,5 +1,6 @@
 import { createRoot, connect, type Remix } from "@remix-run/dom";
 import { CollaborativeEditor } from "../utils/CollaborativeEditor";
+import { oklch, formatHex } from "culori";
 
 const welshFlowers = [
   "Daffodil",
@@ -25,6 +26,16 @@ const welshFlowers = [
   "Cornflower",
 ];
 
+const oklchToRgb = (oklchStr: string): string => {
+  try {
+    const color = oklch(oklchStr.trim());
+    if (!color) return oklchStr.trim();
+    return formatHex(color);
+  } catch {
+    return oklchStr.trim();
+  }
+};
+
 function pickRandomColor() {
   const rootStyles = getComputedStyle(document.documentElement);
   const colorVars = [
@@ -40,7 +51,7 @@ function pickRandomColor() {
     "--color-magenta-600",
   ];
   const colors = colorVars
-    .map((v) => rootStyles.getPropertyValue(v).trim())
+    .map((v) => oklchToRgb(rootStyles.getPropertyValue(v).trim()))
     .filter(Boolean);
   if (!colors.length) return "red";
   const idx = Math.floor(Math.random() * colors.length);
@@ -75,17 +86,15 @@ function App(this: Remix.Handle) {
 
   return () => (
     <>
-      <div className="editor-wrapper">
-        <h1>marky</h1>
-        <div
-          className="editor-container"
-          on={[
-            connect((event) => {
-              editor.handleEditorConnect(event);
-            }),
-          ]}
-        />
-      </div>
+      <h1>marky</h1>
+      <div
+        className="editor-container"
+        on={[
+          connect((event) => {
+            editor.handleEditorConnect(event);
+          }),
+        ]}
+      />
     </>
   );
 }

@@ -18,6 +18,7 @@
     "@remix-run/interaction": "^0.1.0",
     "@remix-run/lazy-file": "^3.7.0",
     "@remix-run/node-fetch-server": "^0.12.0",
+    "culori": "^4.0.2",
     "prosemirror-commands": "^1.7.1",
     "prosemirror-keymap": "^1.2.3",
     "prosemirror-model": "^1.25.4",
@@ -32,6 +33,7 @@
   "devDependencies": {
     "@tailwindcss/cli": "^4.1.17",
     "@tailwindcss/postcss": "^4.1.17",
+    "@types/culori": "^4.0.1",
     "@types/node": "^24.10.0",
     "@types/ws": "^8.18.1",
     "concurrently": "^9.2.1",

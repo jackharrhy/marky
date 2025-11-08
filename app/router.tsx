@@ -33,8 +33,8 @@ router.map(routes.home, () =>
           href={routes.assets.href({ path: "style.css" })}
         />
       </head>
-      <body>
-        <div id="root" />
+      <body className="bg-base-50 flex flex-col h-full">
+        <div id="root" className="flex-1" />
       </body>
     </html>
   )
