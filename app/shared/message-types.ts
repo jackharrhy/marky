@@ -1,4 +1,3 @@
-// Message type constants for WebSocket protocol
 export const MESSAGE_TYPE_SYNC = 0;
 export const MESSAGE_TYPE_AWARENESS = 1;
 export const MESSAGE_TYPE_FILE_LIST = 2;

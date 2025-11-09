@@ -55,7 +55,12 @@ function pickRandomColor() {
   return colors[idx];
 }
 
-export function getUser(): { name: string; color: string } {
+export interface User {
+  name: string;
+  color: string;
+}
+
+export function getUser(): User {
   const stored = localStorage.getItem("user");
   if (stored) {
     try {

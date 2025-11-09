@@ -2,7 +2,6 @@
 @import "prosemirror-view/style/prosemirror.css";
 
 @theme {
-  /* Disable default colors to prevent their use; feel free to re-enable as needed. */
   --color-amber-*: initial;
   --color-lime-*: initial;
   --color-emerald-*: initial;
@@ -18,7 +17,6 @@
   --color-neutral-*: initial;
   --color-stone-*: initial;
 
-  /* Specify new default colors. */
   --color-black: #100f0f;
   --color-paper: #fffcf0;
   --color-base-50: #f2f0e5;
@@ -140,7 +138,6 @@
   --color-magenta-950: #24131d;
 }
 
-/* Define some semantic aliases. */
 @theme inline {
   --color-light-bg: var(--color-paper);
   --color-light-bg-2: var(--color-base-50);
@@ -215,7 +212,6 @@ body {
   margin: 0;
 }
 
-/* This gives the remote user caret. The colors are automatically overwritten*/
 .ProseMirror-yjs-cursor {
   position: relative;
   margin-left: -1px;
@@ -227,7 +223,6 @@ body {
   pointer-events: none;
 }
 
-/* This renders the username above the caret */
 .ProseMirror-yjs-cursor > div {
   position: absolute;
   top: -1.05em;

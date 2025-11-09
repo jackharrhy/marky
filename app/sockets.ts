@@ -14,8 +14,7 @@ import {
   prosemirrorToYXmlFragment,
   yXmlFragmentToProseMirrorRootNode,
 } from "y-prosemirror";
-import { plainTextSchema } from "./frontend/schema.js";
-import { textToDoc, docToText } from "./shared/doc-utils.js";
+import { textToDoc, docToText, plainTextSchema } from "./shared/doc-utils.js";
 import {
   MESSAGE_TYPE_SYNC,
   MESSAGE_TYPE_AWARENESS,
@@ -29,7 +28,6 @@ import {
   PROSEMIRROR_FRAGMENT_NAME,
   MARKDOWN_EXTENSION,
 } from "./shared/constants.js";
-import { log } from "./shared/log.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -37,9 +35,7 @@ const contentDir = path.join(__dirname, "..", "content");
 
 const rootDoc = new Y.Doc();
 const filesMap = rootDoc.getMap("files");
-// Track filename -> subdoc mapping separately for easier access
 const filenameToSubdoc = new Map<string, Y.Doc>();
-// Track filename -> subdoc awareness mapping
 const filenameToSubdocAwareness = new Map<string, Awareness>();
 
 interface Client {
@@ -53,10 +49,8 @@ const wss = new WebSocketServer({ noServer: true });
 
 let currentClientId = 0;
 
-// Track which files exist on disk
 const filesOnDisk = new Set<string>();
 
-// Scan content directory for markdown files
 async function scanContentDirectory() {
   try {
     const files = await fs.readdir(contentDir);
@@ -72,7 +66,6 @@ async function scanContentDirectory() {
       }
     }
 
-    // Remove subdocs for files that no longer exist
     const keysToRemove: string[] = [];
     filenameToSubdoc.forEach((_, key) => {
       if (!filesOnDisk.has(key)) {
@@ -90,42 +83,36 @@ async function scanContentDirectory() {
 
     return Array.from(filesOnDisk);
   } catch (error) {
-    log.error("Error scanning content directory:", error);
+    console.error("Error scanning content directory:", error);
     return [];
   }
 }
 
-// Load file content from disk into subdocument
 async function loadFileContent(filename: string, subdoc: Y.Doc) {
   const filePath = path.join(contentDir, filename);
   try {
     const content = await fs.readFile(filePath, "utf-8");
-    // Convert plain text to ProseMirror doc and populate XmlFragment
     const doc = textToDoc(content);
     const xmlFragment = subdoc.getXmlFragment(PROSEMIRROR_FRAGMENT_NAME);
     xmlFragment.delete(0, xmlFragment.length);
     prosemirrorToYXmlFragment(doc, xmlFragment);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      // File doesn't exist - create empty file
       await fs.writeFile(filePath, "", "utf-8");
       filesOnDisk.add(filename);
-      // Initialize with empty doc
       const doc = textToDoc("");
       const xmlFragment = subdoc.getXmlFragment(PROSEMIRROR_FRAGMENT_NAME);
       xmlFragment.delete(0, xmlFragment.length);
       prosemirrorToYXmlFragment(doc, xmlFragment);
     } else {
-      log.error(`Error loading file ${filename}:`, error);
+      console.error(`Error loading file ${filename}:`, error);
     }
   }
 }
 
-// Save subdocument content to disk
 async function persistFileContent(filename: string, subdoc: Y.Doc) {
   const filePath = path.join(contentDir, filename);
   try {
-    // Read from XmlFragment and convert to plain text
     const xmlFragment = subdoc.getXmlFragment(PROSEMIRROR_FRAGMENT_NAME);
     const doc = yXmlFragmentToProseMirrorRootNode(xmlFragment, plainTextSchema);
     const content = docToText(doc);
@@ -133,15 +120,13 @@ async function persistFileContent(filename: string, subdoc: Y.Doc) {
     filesOnDisk.add(filename);
     return true;
   } catch (error) {
-    log.error(`Error persisting file ${filename}:`, error);
+    console.error(`Error persisting file ${filename}:`, error);
     return false;
   }
 }
 
-// Send file list to a client
 function sendFileList(ws: WebSocket) {
   const files = Array.from(filenameToSubdoc.keys());
-  log.info(`Sending file list of ${files.length} files`);
   const message = Buffer.concat([
     Buffer.from([MESSAGE_TYPE_FILE_LIST]),
     Buffer.from(JSON.stringify(files)),
@@ -149,20 +134,17 @@ function sendFileList(ws: WebSocket) {
   ws.send(message);
 }
 
-// Handle subdocs event
 rootDoc.on("subdocs", ({ added, removed, loaded }) => {
   loaded.forEach((subdoc) => {
-    // Find which file this subdoc belongs to
     filenameToSubdoc.forEach((doc, filename) => {
       if (doc === subdoc) {
         loadFileContent(filename, doc).catch((error) => {
-          log.error(`Error loading content for ${filename}:`, error);
+          console.error(`Error loading content for ${filename}:`, error);
         });
       }
     });
   });
 
-  // Broadcast file list updates to all clients
   clients.forEach((client) => {
     if (client.ws.readyState === WebSocket.OPEN) {
       sendFileList(client.ws);
@@ -170,12 +152,10 @@ rootDoc.on("subdocs", ({ added, removed, loaded }) => {
   });
 });
 
-// Initialize: scan directory and create subdocs
 scanContentDirectory().then((files) => {
-  log.info(`Found ${files.length} markdown files in content directory`);
+  console.info(`Found ${files.length} markdown files in content directory`);
 });
 
-// Track which subdocuments each client has loaded
 const clientSubdocs = new Map<WebSocket, Map<string, Y.Doc>>();
 
 wss.on("connection", (ws: WebSocket) => {
@@ -187,19 +167,16 @@ wss.on("connection", (ws: WebSocket) => {
   clients.add(client);
   clientSubdocs.set(ws, new Map());
 
-  // Send root doc state
-  const syncStep1 = Y.encodeStateAsUpdate(rootDoc);
-  ws.send(Buffer.concat([Buffer.from([MESSAGE_TYPE_SYNC]), syncStep1]));
+  const syncStep = Y.encodeStateAsUpdate(rootDoc);
+  ws.send(Buffer.concat([Buffer.from([MESSAGE_TYPE_SYNC]), syncStep]));
 
-  // Send file list
   sendFileList(ws);
 
-  // Handle root doc updates
-  const rootDocUpdateHandler = (update: Uint8Array, origin: any) => {
+  const rootDocUpdateHandler = (update: Uint8Array, origin: unknown) => {
     if (origin !== ws) {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(
-          Buffer.concat([Buffer.from([messageSync]), Buffer.from(update)])
+          Buffer.concat([Buffer.from([MESSAGE_TYPE_SYNC]), Buffer.from(update)])
         );
       }
     }
@@ -207,7 +184,6 @@ wss.on("connection", (ws: WebSocket) => {
 
   rootDoc.on("update", rootDocUpdateHandler);
 
-  // Handle subdoc updates
   const subdocUpdateHandlers = new Map<Y.Doc, (update: Uint8Array) => void>();
 
   ws.on("message", async (message: Buffer) => {
@@ -218,10 +194,8 @@ wss.on("connection", (ws: WebSocket) => {
 
     if (messageType === MESSAGE_TYPE_SYNC) {
       try {
-        // Root doc sync
         Y.applyUpdate(rootDoc, content, ws);
 
-        // Broadcast to other clients
         clients.forEach((client) => {
           if (client.ws !== ws && client.ws.readyState === WebSocket.OPEN) {
             client.ws.send(
@@ -230,11 +204,10 @@ wss.on("connection", (ws: WebSocket) => {
           }
         });
       } catch (error) {
-        log.error("Error applying Yjs update:", error);
+        console.error("Error applying Yjs update:", error);
       }
     } else if (messageType === MESSAGE_TYPE_SUBDOC_SYNC) {
       try {
-        // Subdoc sync - format: [filenameLength (1 byte)][filename][update]
         const filenameLength = content[0];
         const filename = content.slice(1, 1 + filenameLength).toString("utf-8");
         const update = content.slice(1 + filenameLength);
@@ -243,7 +216,6 @@ wss.on("connection", (ws: WebSocket) => {
         if (subdoc) {
           Y.applyUpdate(subdoc, update, ws);
 
-          // Broadcast to other clients that have this subdoc loaded
           clients.forEach((client) => {
             const subs = clientSubdocs.get(client.ws);
             if (
@@ -264,10 +236,9 @@ wss.on("connection", (ws: WebSocket) => {
           });
         }
       } catch (error) {
-        log.error("Error applying subdoc update:", error);
+        console.error("Error applying subdoc update:", error);
       }
     } else if (messageType === MESSAGE_TYPE_AWARENESS) {
-      // Root awareness updates are broadcast to all clients
       clients.forEach((client) => {
         if (client.ws !== ws && client.ws.readyState === WebSocket.OPEN) {
           client.ws.send(
@@ -277,12 +248,10 @@ wss.on("connection", (ws: WebSocket) => {
       });
     } else if (messageType === MESSAGE_TYPE_SUBDOC_AWARENESS) {
       try {
-        // Format: [filenameLength (1 byte)][filename][awarenessUpdate]
         const filenameLength = content[0];
         const filename = content.slice(1, 1 + filenameLength).toString("utf-8");
         const awarenessUpdate = content.slice(1 + filenameLength);
 
-        // Get or create subdoc awareness
         let subdocAwareness = filenameToSubdocAwareness.get(filename);
         if (!subdocAwareness) {
           const subdoc = filenameToSubdoc.get(filename);
@@ -293,10 +262,8 @@ wss.on("connection", (ws: WebSocket) => {
         }
 
         if (subdocAwareness) {
-          // Apply the awareness update
           applyAwarenessUpdate(subdocAwareness, awarenessUpdate, ws);
 
-          // Broadcast to other clients viewing this subdoc
           clients.forEach((client) => {
             const clientSubs = clientSubdocs.get(client.ws);
             if (
@@ -318,13 +285,12 @@ wss.on("connection", (ws: WebSocket) => {
           });
         }
       } catch (error) {
-        log.error("Error handling subdoc awareness:", error);
+        console.error("Error handling subdoc awareness:", error);
       }
     } else if (messageType === MESSAGE_TYPE_OPEN_FILE) {
       try {
         const filename = content.toString("utf-8");
 
-        // Get or create subdocument
         let subdoc = filenameToSubdoc.get(filename);
         if (!subdoc) {
           subdoc = new Y.Doc();
@@ -332,33 +298,26 @@ wss.on("connection", (ws: WebSocket) => {
           filenameToSubdoc.set(filename, subdoc);
         }
 
-        // Create subdoc awareness if it doesn't exist
         if (!filenameToSubdocAwareness.has(filename)) {
           const subdocAwareness = new Awareness(subdoc);
           filenameToSubdocAwareness.set(filename, subdocAwareness);
         }
 
-        // Track that this client has this subdoc
         const clientSubs = clientSubdocs.get(ws);
         if (clientSubs) {
           clientSubs.set(filename, subdoc);
         }
 
-        // Load file content from disk BEFORE loading the subdoc
-        // This ensures content is available when subdoc is synced
         await loadFileContent(filename, subdoc);
 
-        // Load the subdoc (triggers subdocs event)
         subdoc.load();
 
-        // Broadcast updated file list to all clients (in case this is a new file)
         clients.forEach((client) => {
           if (client.ws.readyState === WebSocket.OPEN) {
             sendFileList(client.ws);
           }
         });
 
-        // Send subdoc state to client with filename
         const subdocUpdate = Y.encodeStateAsUpdate(subdoc);
         const filenameBuf = Buffer.from(filename, "utf-8");
         ws.send(
@@ -370,7 +329,6 @@ wss.on("connection", (ws: WebSocket) => {
           ])
         );
 
-        // Send subdoc awareness state to client
         const subdocAwareness = filenameToSubdocAwareness.get(filename);
         if (subdocAwareness) {
           const awarenessUpdate = encodeAwarenessUpdate(subdocAwareness, [
@@ -388,8 +346,6 @@ wss.on("connection", (ws: WebSocket) => {
           }
         }
 
-        // Set up update handler for this subdoc if not already set
-        // This handles updates from server-side changes (like loading from disk)
         if (!subdocUpdateHandlers.has(subdoc)) {
           const handler = (update: Uint8Array) => {
             const filenameBuf = Buffer.from(filename, "utf-8");
@@ -415,7 +371,7 @@ wss.on("connection", (ws: WebSocket) => {
           subdocUpdateHandlers.set(subdoc, handler);
         }
       } catch (error) {
-        log.error("Error opening file:", error);
+        console.error("Error opening file:", error);
       }
     } else if (messageType === MESSAGE_TYPE_PERSIST_FILE) {
       try {
@@ -425,14 +381,13 @@ wss.on("connection", (ws: WebSocket) => {
         if (subdoc) {
           const success = await persistFileContent(filename, subdoc);
           if (success) {
-            // Rescan directory to update file list
             await scanContentDirectory();
           }
         } else {
-          log.error(`Cannot persist file ${filename}: subdoc not found`);
+          console.error(`Cannot persist file ${filename}: subdoc not found`);
         }
       } catch (error) {
-        log.error("Error persisting file:", error);
+        console.error("Error persisting file:", error);
       }
     }
   });
@@ -448,7 +403,7 @@ wss.on("connection", (ws: WebSocket) => {
   });
 
   ws.on("error", (error) => {
-    log.error("WebSocket error:", { clientId, error });
+    console.error("WebSocket error:", { clientId, error });
     clients.forEach((c) => {
       if (c.ws === ws) {
         clients.delete(c);

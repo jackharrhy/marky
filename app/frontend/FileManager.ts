@@ -1,6 +1,8 @@
 import { SocketHandler } from "./SocketHandler";
-import { log } from "../shared/log";
 import { MARKDOWN_EXTENSION } from "../shared/constants";
+
+import debugFactory from "debug";
+const debug = debugFactory("marky:frontend:FileManager");
 
 export class FileManager {
   private socketHandler: SocketHandler;
@@ -20,7 +22,7 @@ export class FileManager {
   }
 
   handleFileListUpdate(fileList: string[]) {
-    log.info(
+    debug(
       `handleFileListUpdate called with file list of ${fileList.length} files`
     );
     this.files = fileList;
@@ -28,31 +30,23 @@ export class FileManager {
   }
 
   openFile(filename: string) {
-    log.info("openFile called with:", filename);
-    log.info("Setting currentFilename to:", filename);
+    debug("openFile called with:", filename);
     this.currentFilename = filename;
-
-    // Update awareness state with current file
     this.socketHandler.setCurrentFile(filename);
-
     this.onCurrentFileChange?.();
-
-    // Request to open file - editor will be set up when content arrives
-    log.info("Calling socketHandler.openFile");
     this.socketHandler.openFile(filename);
   }
 
   createNewFile(filename: string) {
     const trimmed = filename.trim();
     if (!trimmed) {
-      log.info("Early return: empty filename");
+      console.warn("cannot create new file with empty filename");
       return;
     }
 
     const fullFilename = trimmed.endsWith(MARKDOWN_EXTENSION)
       ? trimmed
       : `${trimmed}${MARKDOWN_EXTENSION}`;
-    log.info("Opening file:", fullFilename);
 
     this.openFile(fullFilename);
   }

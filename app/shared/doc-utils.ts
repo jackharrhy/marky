@@ -1,6 +1,20 @@
-import { plainTextSchema } from "../frontend/schema.js";
+import { Schema } from "prosemirror-model";
 
-// Helper to convert plain text string to ProseMirror doc
+export const plainTextSchema = new Schema({
+  nodes: {
+    doc: {
+      content: "paragraph+",
+    },
+    paragraph: {
+      content: "text*",
+      group: "block",
+      parseDOM: [{ tag: "p" }],
+      toDOM: () => ["p", 0],
+    },
+    text: {},
+  },
+});
+
 export function textToDoc(
   text: string
 ): ReturnType<typeof plainTextSchema.node> {
@@ -21,7 +35,6 @@ export function textToDoc(
   return plainTextSchema.node("doc", null, paragraphs);
 }
 
-// Helper to convert ProseMirror doc to plain text string
 export function docToText(
   doc: ReturnType<typeof plainTextSchema.node>
 ): string {

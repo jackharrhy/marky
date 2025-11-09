@@ -10,8 +10,8 @@ import { EditorState } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 import { keymap } from "prosemirror-keymap";
 import { baseKeymap } from "prosemirror-commands";
-import { plainTextSchema } from "./schema";
 import { PROSEMIRROR_FRAGMENT_NAME } from "../shared/constants";
+import { plainTextSchema } from "../shared/doc-utils";
 
 export interface CollaborativeEditorOptions {
   subdoc: Y.Doc;
@@ -29,16 +29,13 @@ export class CollaborativeEditor {
     this.subdoc = options.subdoc;
     this.awareness = options.awareness;
 
-    // Get or create the XmlFragment for prosemirror sync
     this.type = this.subdoc.getXmlFragment(PROSEMIRROR_FRAGMENT_NAME);
 
-    // Get the doc from XmlFragment to use as initial doc
     const docFromFragment = yXmlFragmentToProseMirrorRootNode(
       this.type,
       plainTextSchema
     );
 
-    // Create editor state - y-prosemirror will sync FROM XmlFragment TO editor
     this.editorState = EditorState.create({
       schema: plainTextSchema,
       doc: docFromFragment,
@@ -52,7 +49,6 @@ export class CollaborativeEditor {
   }
 
   switchToSubdoc(subdoc: Y.Doc, awareness?: Awareness) {
-    // Destroy old view if it exists
     if (this.view) {
       this.view.destroy();
       this.view = null;
@@ -61,18 +57,15 @@ export class CollaborativeEditor {
     this.subdoc = subdoc;
     this.type = this.subdoc.getXmlFragment(PROSEMIRROR_FRAGMENT_NAME);
 
-    // Update awareness if provided
     if (awareness) {
       this.awareness = awareness;
     }
 
-    // Get the doc from XmlFragment to use as initial doc
     const docFromFragment = yXmlFragmentToProseMirrorRootNode(
       this.type,
       plainTextSchema
     );
 
-    // Recreate editor state - y-prosemirror will sync FROM XmlFragment TO editor
     this.editorState = EditorState.create({
       schema: plainTextSchema,
       doc: docFromFragment,
@@ -86,13 +79,11 @@ export class CollaborativeEditor {
   }
 
   mount(element: HTMLElement) {
-    // Destroy existing view if it exists
     if (this.view) {
       this.view.destroy();
       this.view = null;
     }
 
-    // Clear the element and create new view
     element.innerHTML = "";
     this.view = new EditorView(element, {
       state: this.editorState,

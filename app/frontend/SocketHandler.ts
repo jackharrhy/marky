@@ -13,11 +13,13 @@ import {
   MESSAGE_TYPE_SUBDOC_SYNC,
   MESSAGE_TYPE_SUBDOC_AWARENESS,
 } from "../shared/message-types.js";
-import { log } from "../shared/log.js";
+import { type User } from "./utils.js";
+
+import debugFactory from "debug";
+const debug = debugFactory("marky:frontend:SocketHandler");
 
 export interface SocketHandlerCallbacks {
   onFileListUpdate: (files: string[]) => void;
-  onFileOpened: (filename: string, subdoc: Y.Doc) => void;
   onSubdocUpdate: (filename: string, subdoc: Y.Doc) => void;
   onAwarenessUpdate?: () => void;
   onSubdocAwarenessUpdate?: (filename: string) => void;
@@ -26,7 +28,7 @@ export interface SocketHandlerCallbacks {
 export class SocketHandler {
   private rootDoc: Y.Doc;
   private filesMap: Y.Map<Y.Doc>;
-  private awareness: Awareness; // Root awareness for file tracking
+  private awareness: Awareness;
   private ws: WebSocket;
   private callbacks: SocketHandlerCallbacks;
   private filenameToSubdoc: Map<string, Y.Doc> = new Map();
@@ -50,7 +52,6 @@ export class SocketHandler {
     this.ws.onclose = () => this.handleWebSocketClose();
     this.ws.onmessage = (event) => this.handleWebSocketMessage(event);
 
-    // Handle root doc updates
     this.rootDoc.on("update", (update: Uint8Array) => {
       if (this.ws.readyState === WebSocket.OPEN) {
         const message = new Uint8Array(1 + update.length);
@@ -60,7 +61,6 @@ export class SocketHandler {
       }
     });
 
-    // Handle awareness updates
     this.awareness.on(
       "update",
       ({
@@ -89,51 +89,40 @@ export class SocketHandler {
             }
           }
         }
-        // Notify callback of awareness changes
+
         if (this.callbacks.onAwarenessUpdate) {
           this.callbacks.onAwarenessUpdate();
         }
       }
     );
 
-    // Handle subdocs event
     this.rootDoc.on("subdocs", ({ added, removed, loaded }) => {
       loaded.forEach((subdoc) => {
-        // Find which file this subdoc belongs to
         this.filesMap.forEach((doc, filename) => {
           if (doc === subdoc) {
             this.filenameToSubdoc.set(filename, subdoc);
 
-            // Set up awareness for this subdoc
             this.setupSubdocAwareness(filename, subdoc);
 
-            // Set up update handler for this subdoc
             subdoc.on("update", (update: Uint8Array, origin: unknown) => {
-              // Don't send updates that originate from the subdoc itself (local initialization)
-              // Only send updates from user edits (which come from y-prosemirror)
               if (origin !== subdoc) {
                 this.sendSubdocUpdate(filename, update);
               }
             });
-            this.callbacks.onFileOpened(filename, subdoc);
           }
         });
       });
     });
   }
 
-  /**
-   * Set up awareness for a subdoc - extracted to avoid duplication
-   */
   private setupSubdocAwareness(filename: string, subdoc: Y.Doc): void {
     if (this.filenameToSubdocAwareness.has(filename)) {
-      return; // Already set up
+      return;
     }
 
     const subdocAwareness = new Awareness(subdoc);
     this.filenameToSubdocAwareness.set(filename, subdocAwareness);
 
-    // Set up awareness update handler for this subdoc
     subdocAwareness.on(
       "update",
       ({
@@ -159,23 +148,20 @@ export class SocketHandler {
             }
           }
         }
-        // Notify callback of subdoc awareness changes
         if (this.callbacks.onSubdocAwarenessUpdate) {
           this.callbacks.onSubdocAwarenessUpdate(filename);
         }
       }
     );
 
-    // Set user info in subdoc awareness
     const currentState = this.awareness.getLocalState();
     if (currentState && currentState.user) {
       subdocAwareness.setLocalStateField("user", currentState.user);
     }
   }
 
-  setAwarenessState(user: { name: string; color: string }) {
+  setAwarenessState(user: User) {
     this.awareness.setLocalStateField("user", user);
-    // Also set user info in all subdoc awareness instances
     this.filenameToSubdocAwareness.forEach((subdocAwareness) => {
       subdocAwareness.setLocalStateField("user", user);
     });
@@ -187,7 +173,7 @@ export class SocketHandler {
 
   getAllAwarenessStates(): Map<
     number,
-    { user?: { name: string; color: string }; currentFile?: string | null }
+    { user?: User; currentFile?: string | null }
   > {
     const states = new Map();
     this.awareness.getStates().forEach((state, clientId) => {
@@ -197,7 +183,7 @@ export class SocketHandler {
   }
 
   private handleWebSocketOpen() {
-    log.info("WebSocket connected");
+    debug("web socket connected");
     const awarenessUpdate = encodeAwarenessUpdate(this.awareness, [
       this.awareness.clientID,
     ]);
@@ -210,11 +196,11 @@ export class SocketHandler {
   }
 
   private handleWebSocketError(error: Event) {
-    log.error("WebSocket error:", error);
+    console.error("WebSocket error:", error);
   }
 
   private handleWebSocketClose() {
-    log.info("WebSocket disconnected");
+    debug("WebSocket disconnected");
     this.awareness.setLocalState(null);
   }
 
@@ -226,7 +212,7 @@ export class SocketHandler {
     } else if (event.data instanceof ArrayBuffer) {
       data = event.data;
     } else {
-      log.warn("received message is neither Blob nor ArrayBuffer", {
+      console.warn("received message is neither Blob nor ArrayBuffer", {
         data: event.data,
       });
       return;
@@ -234,7 +220,7 @@ export class SocketHandler {
 
     const message = new Uint8Array(data);
     if (message.length === 0) {
-      log.warn("received message is empty", { message });
+      console.warn("received message is empty", { message });
       return;
     }
 
@@ -245,7 +231,6 @@ export class SocketHandler {
       Y.applyUpdate(this.rootDoc, content);
     } else if (messageType === MESSAGE_TYPE_AWARENESS) {
       applyAwarenessUpdate(this.awareness, content, null);
-      // Notify callback of awareness changes
       if (this.callbacks.onAwarenessUpdate) {
         this.callbacks.onAwarenessUpdate();
       }
@@ -254,11 +239,10 @@ export class SocketHandler {
         const files = JSON.parse(new TextDecoder().decode(content)) as string[];
         this.callbacks.onFileListUpdate(files);
       } catch (error) {
-        log.error("Error parsing file list:", error);
+        console.error("Error parsing file list:", error);
       }
     } else if (messageType === MESSAGE_TYPE_SUBDOC_SYNC) {
       try {
-        // Format: [filenameLength (1 byte)][filename][update]
         const filenameLength = content[0];
         const filename = new TextDecoder().decode(
           content.slice(1, 1 + filenameLength)
@@ -267,19 +251,14 @@ export class SocketHandler {
 
         let subdoc = this.filenameToSubdoc.get(filename);
         if (!subdoc) {
-          // Get subdoc from filesMap
           subdoc = this.filesMap.get(filename) as Y.Doc;
           if (subdoc) {
             this.filenameToSubdoc.set(filename, subdoc);
             subdoc.load();
 
-            // Set up awareness for this subdoc
             this.setupSubdocAwareness(filename, subdoc);
 
-            // Set up update handler
             subdoc.on("update", (update: Uint8Array, origin: unknown) => {
-              // Don't send updates that originate from the subdoc itself (local initialization)
-              // Only send updates from user edits (which come from y-prosemirror)
               if (origin !== subdoc) {
                 this.sendSubdocUpdate(filename, update);
               }
@@ -292,11 +271,10 @@ export class SocketHandler {
           this.callbacks.onSubdocUpdate(filename, subdoc);
         }
       } catch (error) {
-        log.error("Error handling subdoc sync:", error);
+        console.error("Error handling subdoc sync:", error);
       }
     } else if (messageType === MESSAGE_TYPE_SUBDOC_AWARENESS) {
       try {
-        // Format: [filenameLength (1 byte)][filename][awarenessUpdate]
         const filenameLength = content[0];
         const filename = new TextDecoder().decode(
           content.slice(1, 1 + filenameLength)
@@ -306,13 +284,12 @@ export class SocketHandler {
         const subdocAwareness = this.filenameToSubdocAwareness.get(filename);
         if (subdocAwareness) {
           applyAwarenessUpdate(subdocAwareness, awarenessUpdate, null);
-          // Notify callback of subdoc awareness changes
           if (this.callbacks.onSubdocAwarenessUpdate) {
             this.callbacks.onSubdocAwarenessUpdate(filename);
           }
         }
       } catch (error) {
-        log.error("Error handling subdoc awareness:", error);
+        console.error("Error handling subdoc awareness:", error);
       }
     }
   }
@@ -332,15 +309,13 @@ export class SocketHandler {
   }
 
   openFile(filename: string) {
-    log.info("SocketHandler.openFile called with:", filename);
-    log.info("WebSocket readyState:", this.ws.readyState);
+    debug("openFile called with:", filename);
     const message = new TextEncoder().encode(filename);
     const fullMessage = new Uint8Array(1 + message.length);
     fullMessage[0] = MESSAGE_TYPE_OPEN_FILE;
     fullMessage.set(message, 1);
-    log.info("Sending openFile message, length:", fullMessage.length);
     this.ws.send(fullMessage);
-    log.info("Message sent");
+    debug("openFile message sent");
   }
 
   persistFile(filename: string) {
@@ -349,6 +324,7 @@ export class SocketHandler {
     fullMessage[0] = MESSAGE_TYPE_PERSIST_FILE;
     fullMessage.set(message, 1);
     this.ws.send(fullMessage);
+    debug("persistFile message sent");
   }
 
   getSubdoc(filename: string): Y.Doc | undefined {
@@ -366,9 +342,7 @@ export class SocketHandler {
     return this.filenameToSubdocAwareness.get(filename);
   }
 
-  getAllSubdocAwarenessStates(
-    filename: string
-  ): Map<number, { user?: { name: string; color: string } }> {
+  getAllSubdocAwarenessStates(filename: string): Map<number, { user?: User }> {
     const subdocAwareness = this.filenameToSubdocAwareness.get(filename);
     if (!subdocAwareness) {
       return new Map();
