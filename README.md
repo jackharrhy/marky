@@ -10,17 +10,31 @@ single WebSocket. Edits stay in memory until you click "Persist".
 - ProseMirror + Yjs + y-prosemirror for the collaborative editor
 - y-protocols/awareness for cursors and presence
 
+## Requirements
+
+Node `>=24.3.0`.
+
 ## Commands
 
 ```sh
 npm i
+npm run dev        # tsx watch, restarts on changes
 npm start          # http://localhost:44100
 npm test           # full test suite
 npm run typecheck
 ```
 
-Set `MARKY_CONTENT_DIR` to point at a different content directory. By default
-the server uses `./content/` and creates the directory on first run.
+## Content directory
+
+By default the server reads and writes markdown files in `./content/` and
+creates the directory on first run. Override with `MARKY_CONTENT_DIR` to
+point at a vault elsewhere on disk:
+
+```sh
+MARKY_CONTENT_DIR=~/notes npm start
+```
+
+You can also symlink `content/` to an existing vault — `content` is gitignored.
 
 ## Layout
 
