@@ -334,7 +334,7 @@ import {
   resolveRoleColor,
   type Role,
 } from '../app/data/discord.ts'
-import { PALETTE_COLORS } from '../app/frontend/user.ts'
+import { PALETTE_COLORS } from '../app/shared/palette.ts'
 
 interface FetchCall {
   url: string
@@ -652,7 +652,7 @@ Expected: every test fails because `app/data/discord.ts` doesn't exist.
 - [ ] **Step 1: Write `app/data/discord.ts`**
 
 ```ts
-import { PALETTE_COLORS } from '../frontend/user.ts'
+import { PALETTE_COLORS } from '../shared/palette.ts'
 
 // Discord API client. Stateless except for the per-guild roles cache.
 // Every fetch-using export accepts an optional `fetchImpl` so tests can
