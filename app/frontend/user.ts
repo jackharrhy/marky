@@ -25,7 +25,7 @@ const FLOWERS = [
   'Cornflower',
 ] as const
 
-const COLORS = [
+export const PALETTE_COLORS = [
   '#205ea6', // blue
   '#24837b', // cyan
   '#66800b', // green
@@ -48,7 +48,7 @@ export function getUser(): User {
   if (stored) return stored
   const created: User = {
     name: `Anonymous ${pick(FLOWERS)}`,
-    color: pick(COLORS),
+    color: pick(PALETTE_COLORS),
   }
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(created))
