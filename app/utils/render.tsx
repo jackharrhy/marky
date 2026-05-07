@@ -1,9 +1,19 @@
 import type { RemixNode } from 'remix/ui'
 import { renderToStream } from 'remix/ui/server'
 
-import { router } from '../router.ts'
+import { loadConfig } from '../config.ts'
+import { createRouter } from '../router.ts'
+
+// One process-wide router for frame resolution. Built lazily so the test
+// harness can construct its own router with overrides without colliding.
+let frameRouter: ReturnType<typeof createRouter> | null = null
+function getFrameRouter() {
+  if (!frameRouter) frameRouter = createRouter({ config: loadConfig() })
+  return frameRouter
+}
 
 export function render(node: RemixNode, request: Request, init?: ResponseInit) {
+  const router = getFrameRouter()
   let stream = renderToStream(node, {
     frameSrc: request.url,
     async resolveFrame(src, target) {
