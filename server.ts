@@ -1,34 +1,47 @@
-import * as http from "node:http";
-import { createRequestListener } from "@remix-run/node-fetch-server";
+import * as path from 'node:path'
 
-import { router } from "./app/router.tsx";
-import { handleUpgrade } from "./app/sockets.ts";
+import { serve } from 'remix/node-serve'
 
-let server = http.createServer(
-  createRequestListener(async (request) => {
+import { ContentStore } from './app/data/content-store.ts'
+import { attachSockets } from './app/middleware/sockets.ts'
+import { router } from './app/router.ts'
+
+const port = process.env.PORT ? Number.parseInt(process.env.PORT, 10) : 44100
+
+const contentDir = path.resolve(
+  process.env.MARKY_CONTENT_DIR ?? path.join(process.cwd(), 'content'),
+)
+const store = new ContentStore({ dir: contentDir })
+await store.ensureDir()
+
+const server = serve(
+  async (request) => {
     try {
-      return await router.fetch(request);
+      return await router.fetch(request)
     } catch (error) {
-      console.error(error);
-      return new Response("Internal Server Error", { status: 500 });
+      console.error(error)
+      return new Response('Internal Server Error', { status: 500 })
     }
-  })
-);
+  },
+  {
+    port,
+  },
+)
 
-server.on("upgrade", (request, socket, head) => {
-  if (
-    !["/ws", "/ws/"].includes(request.url ?? "") ||
-    request.method !== "GET"
-  ) {
-    socket.destroy();
-    return;
-  }
+attachSockets(server.app, { store })
 
-  handleUpgrade(request, socket, head);
-});
+await server.ready
+console.log(`marky is running on http://localhost:${server.port}`)
+console.log(`marky: serving content from ${contentDir}`)
 
-let port = process.env.PORT ? parseInt(process.env.PORT, 10) : 44100;
+let shuttingDown = false
 
-server.listen(port, () => {
-  console.log(`marky is running on http://localhost:${port}`);
-});
+function shutdown() {
+  if (shuttingDown) return
+  shuttingDown = true
+  server.close()
+  process.exit(0)
+}
+
+process.on('SIGINT', shutdown)
+process.on('SIGTERM', shutdown)

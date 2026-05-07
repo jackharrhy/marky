@@ -1,51 +1,31 @@
 {
   "name": "marky",
-  "version": "0.1.0",
-  "description": "simple realtime markdown editor",
+  "private": true,
   "type": "module",
   "scripts": {
-    "dev": "NODE_ENV=development tsx watch server.ts",
-    "dev:browser": "concurrently -n tailwind,esbuild -c \"bgBlue.bold,bgMagenta.bold\" \"pnpm:dev:tailwind\" \"pnpm:dev:esbuild\"",
-    "dev:tailwind": "tailwindcss -i app/assets/app.css -o public/assets/style.css --watch --map",
-    "dev:esbuild": "esbuild app/assets/entry.tsx --outbase=app/assets --outdir=public/assets --bundle --splitting --format=esm --entry-names='[dir]/[name]' --chunk-names='chunks/[name]-[hash]' --sourcemap --watch",
+    "dev": "tsx watch server.ts",
     "start": "tsx server.ts",
+    "test": "tsx --test --test-force-exit test/**/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
+  "engines": {
+    "node": ">=24.3.0"
+  },
   "dependencies": {
-    "@remix-run/dom": "jam",
-    "@remix-run/fetch-router": "^0.8.0",
-    "@remix-run/headers": "^0.16.0",
-    "@remix-run/interaction": "^0.1.0",
-    "@remix-run/lazy-file": "^3.7.0",
-    "@remix-run/node-fetch-server": "^0.12.0",
-    "culori": "^4.0.2",
     "prosemirror-commands": "^1.7.1",
     "prosemirror-keymap": "^1.2.3",
-    "prosemirror-markdown": "^1.13.2",
     "prosemirror-model": "^1.25.4",
     "prosemirror-schema-basic": "^1.2.4",
     "prosemirror-state": "^1.4.4",
-    "prosemirror-view": "^1.41.3",
-    "ws": "^8.18.3",
+    "prosemirror-view": "^1.41.8",
+    "remix": "^3.0.0-beta.0",
+    "tsx": "latest",
     "y-prosemirror": "^1.3.7",
-    "y-protocols": "^1.0.6",
-    "yjs": "^13.6.27"
+    "y-protocols": "^1.0.7",
+    "yjs": "^13.6.30"
   },
   "devDependencies": {
-    "@tailwindcss/cli": "^4.1.17",
-    "@tailwindcss/postcss": "^4.1.17",
-    "@types/culori": "^4.0.1",
-    "@types/node": "^24.10.0",
-    "@types/ws": "^8.18.1",
-    "concurrently": "^9.2.1",
-    "esbuild": "^0.25.12",
-    "postcss": "^8.5.6",
-    "postcss-cli": "^11.0.1",
-    "tailwindcss": "^4.1.17",
-    "tsx": "^4.20.6"
-  },
-  "keywords": [],
-  "author": "Jack Arthur Harrhy (me@jackharrhy.com)",
-  "license": "MIT",
-  "packageManager": "pnpm@10.20.0+sha512.cf9998222162dd85864d0a8102e7892e7ba4ceadebbf5a31f9c2fce48dfce317a9c53b9f6464d1ef9042cba2e02ae02a9f7c143a2b438cd93c91840f0192b9dd"
+    "@types/node": "latest",
+    "typescript": "latest"
+  }
 }

@@ -1,4 +1,5 @@
 node_modules
-public/assets
-*.context.md
+dist
+.env
+.env.local
 content
