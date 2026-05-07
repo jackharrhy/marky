@@ -42,4 +42,18 @@ describe('routes', () => {
     const response = await router.fetch(new Request(url))
     assert.notEqual(response.status, 200)
   })
+
+  it('asset route denies app/data/discord.ts', async () => {
+    const url = 'http://localhost' + routes.assets.href({ path: 'app/data/discord.ts' })
+    const response = await router.fetch(new Request(url))
+    assert.notEqual(response.status, 200)
+  })
+
+  it('asset route denies app/config.ts', async () => {
+    const url = 'http://localhost' + routes.assets.href({ path: 'app/config.ts' })
+    const response = await router.fetch(new Request(url))
+    // app/config.ts is at the app root; allow rules don't match it, so the
+    // asset server should not serve it.
+    assert.notEqual(response.status, 200)
+  })
 })
