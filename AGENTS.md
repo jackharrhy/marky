@@ -24,9 +24,15 @@ Refer to ./.agents/skills/remix/SKILL.md
 - `app/assets.ts` — compiles browser modules from `app/assets/`, `app/frontend/`,
   `app/shared/`, and `app/ui/`. Server-only modules under `app/data/` and
   `app/middleware/` are denied.
+- `app/config.ts` — typed env loader (`AuthConfig`, `loadConfig(env?)`)
 - `app/controllers/home.tsx` — server-renders the editor page
+- `app/controllers/auth/` — `/auth/*` routes registered only in discord mode
 - `app/data/content-store.ts` — markdown filesystem store (boundary
   validation lives here)
+- `app/data/discord.ts` — Discord API client (`exchangeCode`,
+  `fetchGuildMember`, `fetchGuildRoles`, `resolveDisplayName`,
+  `resolveRoleColor`, `deterministicPaletteColor`)
+- `app/middleware/auth.ts` — `Identity` context key + `identityMiddleware`
 - `app/middleware/sockets.ts` — `SocketRoom` (transport-agnostic protocol) +
   `attachSockets` (uWebSockets adapter)
 - `app/shared/` — modules used by both server and browser:
@@ -34,6 +40,7 @@ Refer to ./.agents/skills/remix/SKILL.md
     `PERSIST_BUTTON_RESET_DELAY_MS`
   - `doc-utils.ts` — `plainTextSchema`, `textToDoc`, `docToText`
   - `message-types.ts` — wire-format message tags
+  - `palette.ts` — fixed color palette shared between server and browser
   - `wire.ts` — frame encode/decode helpers
 - `app/frontend/` — browser-only modules:
   - `collaborative-editor.ts` — ProseMirror EditorView bound to a Yjs subdoc
@@ -74,6 +81,31 @@ know it's running on uWebSockets. `attachSockets(app, options)` is the thin
 adapter that creates a `SocketRoom`, calls `app.ws('/ws', { ... })`, and wires
 each uWS WebSocket as a `PeerConnection`. This separation makes the protocol
 unit-testable without binding a real port.
+
+## Auth Modes
+
+`MARKY_AUTH` switches behavior between two deployment modes selected at boot:
+
+- `anonymous` (default): browser generates `{ name, color }` via
+  `app/frontend/user.ts`, persisted in `localStorage`. The WebSocket
+  upgrade is open; awareness is client-driven. No `/auth/*` routes are
+  registered.
+- `discord`: requires `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`,
+  `DISCORD_GUILD_ID`, `MARKY_BASE_URL`, `SESSION_SECRET`. The router gets
+  global session middleware. `/` redirects to `/auth/sign-in` when there's
+  no session. The OAuth callback verifies guild membership via
+  `GET /users/@me/guilds/{id}/member` and renders `NotInGuildPage` (403)
+  on a 404. Optional `DISCORD_BOT_TOKEN` unlocks
+  `GET /guilds/{id}/roles` so colors come from the user's highest
+  Discord role; otherwise color is a stable palette color hashed from
+  the user id via `deterministicPaletteColor`.
+
+Identity is non-spoofable across the WebSocket layer in discord mode:
+the upgrade handler reads the session cookie via `Cookie.parse` +
+`SessionStorage.read`, binds the identity to the peer, and `SocketRoom`
+rewrites the `user` field of awareness frames via
+`modifyAwarenessUpdate(update, fn)` before broadcasting. Anonymous mode
+trusts client-supplied awareness as before.
 
 ## Testing
 
