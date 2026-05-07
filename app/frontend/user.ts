@@ -2,6 +2,8 @@
 // stays stable across reloads. We pick a random Welsh-flower name and a hex
 // color from a small fixed palette.
 
+import { PALETTE_COLORS } from '../shared/palette.ts'
+
 const FLOWERS = [
   'Daffodil',
   'Leek',
@@ -23,17 +25,6 @@ const FLOWERS = [
   'Honeysuckle',
   'Fern',
   'Cornflower',
-] as const
-
-export const PALETTE_COLORS = [
-  '#205ea6', // blue
-  '#24837b', // cyan
-  '#66800b', // green
-  '#ad8301', // yellow
-  '#bc5215', // orange
-  '#af3029', // red
-  '#5e409d', // purple
-  '#a02f6f', // magenta
 ] as const
 
 const STORAGE_KEY = 'marky:user'
