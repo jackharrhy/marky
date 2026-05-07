@@ -7,10 +7,16 @@ const TITLE = 'marky'
 const FONT_STACK =
   "'Source Code Pro', 'SFMono-Regular', Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace"
 
+export interface EditorPageProps {
+  authMode:
+    | { mode: 'anonymous' }
+    | { mode: 'discord'; identity: { name: string; color: string } }
+}
+
 // Server-rendered shell for the editor. The interactive workspace is a single
 // client entry (`EditorApp`) that owns the websocket, file list, and editor.
 export function EditorPage() {
-  return () => (
+  return (props: EditorPageProps) => (
     <html lang="en">
       <head>
         <meta charSet="utf-8" />
@@ -77,7 +83,7 @@ export function EditorPage() {
           },
         })}
       >
-        <EditorApp />
+        <EditorApp authMode={props.authMode} />
       </body>
     </html>
   )

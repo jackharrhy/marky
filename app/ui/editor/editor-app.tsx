@@ -1,4 +1,4 @@
-import { clientEntry, css, on, ref, type Handle } from 'remix/ui'
+import { clientEntry, css, on, ref, type Handle, type SerializableProps } from 'remix/ui'
 import * as Y from 'yjs'
 
 import { CollaborativeEditor } from '../../frontend/collaborative-editor.ts'
@@ -6,12 +6,18 @@ import { SocketHandler, type AwarenessClientState } from '../../frontend/socket-
 import { getUser, type User } from '../../frontend/user.ts'
 import { MARKDOWN_EXTENSION, PERSIST_BUTTON_RESET_DELAY_MS } from '../../shared/constants.ts'
 
+export interface EditorAppProps extends SerializableProps {
+  authMode:
+    | { mode: 'anonymous' }
+    | { mode: 'discord'; identity: { name: string; color: string } }
+}
+
 // `EditorApp` owns everything browser-side: the websocket, the editor view,
 // the file list, awareness presence, and persistence. It server-renders an
 // empty shell so the page paints fast, then hydrates here.
 export const EditorApp = clientEntry(
   '/assets/app/ui/editor/editor-app.tsx#EditorApp',
-  function EditorApp(handle: Handle) {
+  function EditorApp(handle: Handle<EditorAppProps>) {
     // Setup runs on the server during SSR and again during hydration. Anything
     // that touches `window`, `localStorage`, or opens a websocket has to wait
     // until we know we are in the browser.
@@ -83,7 +89,8 @@ export const EditorApp = clientEntry(
     }
 
     if (isBrowser) {
-      user = getUser()
+      const authMode = handle.props.authMode
+      user = authMode.mode === 'discord' ? authMode.identity : getUser()
       socket = new SocketHandler({
         onFileListUpdate: (next) => {
           files = next
@@ -119,6 +126,13 @@ export const EditorApp = clientEntry(
             <span mix={userBadgeStyle} style={{ color: user.color }}>
               {user.name}
             </span>
+          )}
+          {handle.props.authMode.mode === 'discord' && (
+            <form method="post" action="/auth/sign-out" mix={signOutFormStyle}>
+              <button type="submit" mix={signOutButtonStyle}>
+                Sign out
+              </button>
+            </form>
           )}
         </header>
 
@@ -270,6 +284,21 @@ const userBadgeStyle = css({
   marginLeft: 'auto',
   fontSize: '12px',
   fontWeight: 700,
+})
+
+const signOutFormStyle = css({
+  margin: 0,
+})
+
+const signOutButtonStyle = css({
+  font: 'inherit',
+  background: 'transparent',
+  border: '1px solid var(--ui-2)',
+  color: 'var(--tx-2)',
+  padding: '4px 10px',
+  borderRadius: '4px',
+  cursor: 'pointer',
+  '&:hover': { color: 'var(--tx)', borderColor: 'var(--tx-3)' },
 })
 
 const bodyStyle = css({
