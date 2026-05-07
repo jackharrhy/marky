@@ -1,0 +1,15 @@
+.git
+.github
+.gitignore
+.agents
+.dockerignore
+Dockerfile
+README.md
+AGENTS.md
+node_modules
+content
+test
+*.log
+.DS_Store
+.env
+.env.*
