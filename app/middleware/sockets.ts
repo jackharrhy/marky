@@ -1,8 +1,11 @@
 import type { TemplatedApp, WebSocket } from 'uWebSockets.js'
+import type { Cookie } from 'remix/cookie'
+import type { SessionStorage } from 'remix/session'
 import {
   Awareness,
   applyAwarenessUpdate,
   encodeAwarenessUpdate,
+  modifyAwarenessUpdate,
 } from 'y-protocols/awareness'
 import {
   prosemirrorToYXmlFragment,
@@ -10,6 +13,7 @@ import {
 } from 'y-prosemirror'
 import * as Y from 'yjs'
 
+import type { AppConfig } from '../config.ts'
 import type { ContentStore } from '../data/content-store.ts'
 import { PROSEMIRROR_FRAGMENT_NAME } from '../shared/constants.ts'
 import { docToText, plainTextSchema, textToDoc } from '../shared/doc-utils.ts'
@@ -42,6 +46,19 @@ export interface SocketsOptions {
   store: ContentStore
 }
 
+// Identity bound to a peer when it upgrades through an authenticated session.
+// `SocketRoom` rewrites awareness updates from these peers so the broadcasted
+// `user` field always reflects the server-trusted identity.
+export interface PeerIdentity {
+  name: string
+  color: string
+}
+
+interface PeerState {
+  subscriptions: Set<string>
+  identity?: PeerIdentity
+}
+
 // `SocketRoom` owns the shared Yjs doc tree, file list, awareness, and the
 // per-peer subscription bookkeeping. It is transport-agnostic. `attachSockets`
 // is a thin wrapper that binds it to uWebSockets.
@@ -52,7 +69,7 @@ export class SocketRoom {
   readonly filenameToSubdoc = new Map<string, Y.Doc>()
   readonly filenameToSubdocAwareness = new Map<string, Awareness>()
   private readonly subdocBroadcastHandlers = new Map<Y.Doc, (update: Uint8Array) => void>()
-  private readonly peers = new Map<PeerConnection, Set<string>>()
+  private readonly peers = new Map<PeerConnection, PeerState>()
   private rescanPromise: Promise<void> | null = null
 
   constructor(options: SocketsOptions) {
@@ -98,8 +115,8 @@ export class SocketRoom {
 
   // ---- Peer connect / disconnect ---------------------------------------------
 
-  addPeer(peer: PeerConnection): void {
-    this.peers.set(peer, new Set())
+  addPeer(peer: PeerConnection, identity?: PeerIdentity): void {
+    this.peers.set(peer, { subscriptions: new Set(), identity })
     peer.send(encodeMessage(MESSAGE_TYPE_SYNC, Y.encodeStateAsUpdate(this.rootDoc)))
     this.sendFileList(peer)
   }
@@ -121,7 +138,8 @@ export class SocketRoom {
     }
 
     if (messageType === MESSAGE_TYPE_AWARENESS) {
-      const frame = encodeMessage(MESSAGE_TYPE_AWARENESS, content)
+      const stamped = this.stampIdentity(peer, content)
+      const frame = encodeMessage(MESSAGE_TYPE_AWARENESS, stamped)
       this.broadcast(frame, peer)
       return
     }
@@ -138,10 +156,11 @@ export class SocketRoom {
       const subdoc = this.filenameToSubdoc.get(filename)
       if (!subdoc) return
       const awareness = this.ensureSubdocAwareness(filename, subdoc)
-      applyAwarenessUpdate(awareness, payload, peer)
-      const frame = encodeFileMessage(MESSAGE_TYPE_SUBDOC_AWARENESS, filename, payload)
-      for (const [otherPeer, subs] of this.peers) {
-        if (otherPeer !== peer && subs.has(filename) && otherPeer.isOpen()) {
+      const stamped = this.stampIdentity(peer, payload)
+      applyAwarenessUpdate(awareness, stamped, peer)
+      const frame = encodeFileMessage(MESSAGE_TYPE_SUBDOC_AWARENESS, filename, stamped)
+      for (const [otherPeer, state] of this.peers) {
+        if (otherPeer !== peer && state.subscriptions.has(filename) && otherPeer.isOpen()) {
           otherPeer.send(frame)
         }
       }
@@ -157,7 +176,7 @@ export class SocketRoom {
         this.filenameToSubdoc.set(filename, subdoc)
       }
 
-      this.peers.get(peer)?.add(filename)
+      this.peers.get(peer)?.subscriptions.add(filename)
       this.ensureSubdocAwareness(filename, subdoc)
       this.ensureSubdocBroadcaster(filename, subdoc)
       await this.loadFileIntoSubdoc(filename, subdoc)
@@ -233,8 +252,8 @@ export class SocketRoom {
     if (this.subdocBroadcastHandlers.has(subdoc)) return
     const handler = (update: Uint8Array) => {
       const frame = encodeFileMessage(MESSAGE_TYPE_SUBDOC_SYNC, filename, update)
-      for (const [peer, subs] of this.peers) {
-        if (subs.has(filename) && peer.isOpen()) peer.send(frame)
+      for (const [peer, state] of this.peers) {
+        if (state.subscriptions.has(filename) && peer.isOpen()) peer.send(frame)
       }
     }
     subdoc.on('update', handler)
@@ -277,11 +296,29 @@ export class SocketRoom {
       if (peer !== exclude && peer.isOpen()) peer.send(frame)
     }
   }
+
+  // If a peer has a server-bound identity, rewrite the awareness `user`
+  // field on every outgoing update so clients can't forge their display name
+  // or color. Anonymous peers pass through unchanged.
+  private stampIdentity(peer: PeerConnection, update: Uint8Array): Uint8Array {
+    const identity = this.peers.get(peer)?.identity
+    if (!identity) return update
+    return modifyAwarenessUpdate(update, (state) => ({ ...state, user: identity }))
+  }
 }
 
 interface ClientData {
   id: number
   peer: UwsPeer
+  identity?: PeerIdentity
+}
+
+export interface AttachSocketsOptions {
+  store: ContentStore
+  config: AppConfig
+  sessionStorage?: SessionStorage
+  sessionCookie?: Cookie
+  path?: string
 }
 
 class UwsPeer implements PeerConnection {
@@ -302,9 +339,9 @@ class UwsPeer implements PeerConnection {
 
 export function attachSockets(
   app: TemplatedApp,
-  options: SocketsOptions & { path?: string },
+  options: AttachSocketsOptions,
 ): SocketRoom {
-  const room = new SocketRoom(options)
+  const room = new SocketRoom({ store: options.store })
   let nextClientId = 1
   const path = options.path ?? '/ws'
 
@@ -320,18 +357,70 @@ export function attachSockets(
       const secWebSocketKey = req.getHeader('sec-websocket-key')
       const secWebSocketProtocol = req.getHeader('sec-websocket-protocol')
       const secWebSocketExtensions = req.getHeader('sec-websocket-extensions')
-      res.upgrade<ClientData>(
-        { id: nextClientId++, peer: undefined as unknown as UwsPeer },
-        secWebSocketKey,
-        secWebSocketProtocol,
-        secWebSocketExtensions,
-        context,
-      )
+
+      // Anonymous mode: synchronous upgrade with no identity binding.
+      if (options.config.auth.mode !== 'discord') {
+        res.upgrade<ClientData>(
+          { id: nextClientId++, peer: undefined as unknown as UwsPeer, identity: undefined },
+          secWebSocketKey,
+          secWebSocketProtocol,
+          secWebSocketExtensions,
+          context,
+        )
+        return
+      }
+
+      // Discord mode: read the session cookie, look up the bound identity,
+      // and only upgrade if the user is authenticated.
+      if (!options.sessionStorage || !options.sessionCookie) {
+        res.writeStatus('500 Internal Server Error').end('session not configured')
+        return
+      }
+      const sessionStorage = options.sessionStorage
+      const sessionCookie = options.sessionCookie
+      const cookieHeader = req.getHeader('cookie') ?? ''
+
+      // uWS may discard `res` if the client aborts before we resume.
+      const aborted = { v: false }
+      res.onAborted(() => {
+        aborted.v = true
+      })
+
+      sessionCookie
+        .parse(cookieHeader)
+        .then((value) => sessionStorage.read(value))
+        .then((session) => {
+          if (aborted.v) return
+          const identity = session.get('identity') as
+            | { name: string; color: string; discordId: string }
+            | undefined
+          if (!identity) {
+            res.cork(() => res.writeStatus('401 Unauthorized').end(''))
+            return
+          }
+          res.cork(() => {
+            res.upgrade<ClientData>(
+              {
+                id: nextClientId++,
+                peer: undefined as unknown as UwsPeer,
+                identity: { name: identity.name, color: identity.color },
+              },
+              secWebSocketKey,
+              secWebSocketProtocol,
+              secWebSocketExtensions,
+              context,
+            )
+          })
+        })
+        .catch((error) => {
+          console.error('marky: ws session read failed', error)
+          if (!aborted.v) res.cork(() => res.writeStatus('500').end(''))
+        })
     },
     open(ws) {
       const peer = new UwsPeer(ws)
       ws.getUserData().peer = peer
-      room.addPeer(peer)
+      room.addPeer(peer, ws.getUserData().identity)
     },
     message(ws, message) {
       const bytes = toUint8(message)

@@ -61,8 +61,10 @@ describe('routes', () => {
   })
 
   it('home redirects to /auth/sign-in when discord mode and no session', async () => {
+    const { createCookie } = await import('remix/cookie')
     const { createMemorySessionStorage } = await import('remix/session/memory-storage')
     const sessionStorage = createMemorySessionStorage()
+    const sessionCookie = createCookie('marky.session', { secrets: ['sssh'] })
     const discordRouter = createRouter({
       config: loadConfig({
         MARKY_AUTH: 'discord',
@@ -73,6 +75,7 @@ describe('routes', () => {
         SESSION_SECRET: 'sssh',
       }),
       sessionStorage,
+      sessionCookie,
     })
 
     const response = await discordRouter.fetch(new Request('http://localhost/'))
@@ -84,13 +87,13 @@ describe('routes', () => {
     const { createCookie } = await import('remix/cookie')
     const { createMemorySessionStorage } = await import('remix/session/memory-storage')
     const sessionStorage = createMemorySessionStorage()
-    const cookie = createCookie('marky.session', { secrets: ['sssh'] })
+    const sessionCookie = createCookie('marky.session', { secrets: ['sssh'] })
 
     const seed = await sessionStorage.read(null)
     seed.set('identity', { discordId: '7', name: 'Jack', color: '#205ea6' })
     const sessionId = await sessionStorage.save(seed)
     if (!sessionId) throw new Error('expected session id')
-    const cookieHeader = await cookie.serialize(sessionId)
+    const cookieHeader = await sessionCookie.serialize(sessionId)
 
     const discordRouter = createRouter({
       config: loadConfig({
@@ -102,6 +105,7 @@ describe('routes', () => {
         SESSION_SECRET: 'sssh',
       }),
       sessionStorage,
+      sessionCookie,
     })
 
     const response = await discordRouter.fetch(

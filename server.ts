@@ -1,4 +1,6 @@
+import { createCookie } from 'remix/cookie'
 import { serve } from 'remix/node-serve'
+import { createFsSessionStorage } from 'remix/session/fs-storage'
 
 import { loadConfig } from './app/config.ts'
 import { ContentStore } from './app/data/content-store.ts'
@@ -9,7 +11,28 @@ const config = loadConfig()
 const store = new ContentStore({ dir: config.contentDir })
 await store.ensureDir()
 
-const router = createRouter({ config })
+// In discord mode, the same `Cookie` + `SessionStorage` instances back both
+// the HTTP router (via `session()` middleware) and the WebSocket upgrade
+// handler. Sharing them is what lets the WS path verify the signed cookie
+// the auth controller planted.
+let sessionCookie: ReturnType<typeof createCookie> | undefined
+let sessionStorage: ReturnType<typeof createFsSessionStorage> | undefined
+
+if (config.auth.mode === 'discord') {
+  sessionCookie = createCookie('marky.session', {
+    secrets: [config.auth.sessionSecret],
+    httpOnly: true,
+    sameSite: 'Lax',
+    // Only set `secure: true` when serving over HTTPS so cookies still flow
+    // during local http dev/test runs.
+    secure: config.auth.baseUrl.startsWith('https://'),
+    maxAge: 60 * 60 * 24 * 7,
+    path: '/',
+  })
+  sessionStorage = createFsSessionStorage('./tmp/sessions')
+}
+
+const router = createRouter({ config, sessionStorage, sessionCookie })
 
 const server = serve(
   async (request) => {
@@ -23,7 +46,12 @@ const server = serve(
   { port: config.port },
 )
 
-attachSockets(server.app, { store })
+attachSockets(server.app, {
+  store,
+  config,
+  sessionStorage,
+  sessionCookie,
+})
 
 await server.ready
 console.log(`marky is running on http://localhost:${server.port}`)
