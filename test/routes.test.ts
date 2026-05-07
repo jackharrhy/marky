@@ -1,8 +1,11 @@
 import * as assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { router } from '../app/router.ts'
+import { createRouter } from '../app/router.ts'
+import { loadConfig } from '../app/config.ts'
 import { routes } from '../app/routes.ts'
+
+const router = createRouter({ config: loadConfig({}) })
 
 describe('routes', () => {
   it('home page returns 200 HTML', async () => {
