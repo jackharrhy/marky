@@ -103,4 +103,40 @@ describe('loadConfig', () => {
   it('rejects an invalid PORT', () => {
     assert.throws(() => loadConfig({ PORT: 'not-a-number' }), /PORT must be a number/)
   })
+
+  it('treats whitespace-only discord vars as missing', () => {
+    assert.throws(
+      () =>
+        loadConfig({
+          MARKY_AUTH: 'discord',
+          DISCORD_CLIENT_ID: '   ',
+          DISCORD_CLIENT_SECRET: '\t',
+          DISCORD_GUILD_ID: 'gid',
+          MARKY_BASE_URL: 'https://marky.example.com',
+          SESSION_SECRET: 'sssh',
+        }),
+      (error: Error) => {
+        assert.match(error.message, /DISCORD_CLIENT_ID/)
+        assert.match(error.message, /DISCORD_CLIENT_SECRET/)
+        assert.doesNotMatch(error.message, /DISCORD_GUILD_ID/)
+        return true
+      },
+    )
+  })
+
+  it('trims whitespace from discord values', () => {
+    const config = loadConfig({
+      MARKY_AUTH: 'discord',
+      DISCORD_CLIENT_ID: '  cid  ',
+      DISCORD_CLIENT_SECRET: 'csecret',
+      DISCORD_GUILD_ID: 'gid',
+      MARKY_BASE_URL: '  https://marky.example.com/  ',
+      SESSION_SECRET: 'sssh',
+      DISCORD_BOT_TOKEN: '   ',
+    })
+    if (config.auth.mode !== 'discord') throw new Error('unreachable')
+    assert.equal(config.auth.clientId, 'cid')
+    assert.equal(config.auth.baseUrl, 'https://marky.example.com')
+    assert.equal(config.auth.botToken, undefined)
+  })
 })

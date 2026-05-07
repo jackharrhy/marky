@@ -3,17 +3,17 @@ import * as path from 'node:path'
 // Typed env-derived configuration. Read once at startup via loadConfig() so
 // failures surface before the server binds a port.
 
-export type AuthConfig =
-  | { mode: 'anonymous' }
-  | {
-      mode: 'discord'
-      clientId: string
-      clientSecret: string
-      guildId: string
-      baseUrl: string
-      sessionSecret: string
-      botToken?: string
-    }
+export interface DiscordAuthConfig {
+  mode: 'discord'
+  clientId: string
+  clientSecret: string
+  guildId: string
+  baseUrl: string
+  sessionSecret: string
+  botToken?: string
+}
+
+export type AuthConfig = { mode: 'anonymous' } | DiscordAuthConfig
 
 export interface AppConfig {
   auth: AuthConfig
@@ -44,24 +44,24 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   }
 }
 
-function loadDiscordConfig(env: Record<string, string | undefined>): AuthConfig {
-  const missing = DISCORD_REQUIRED.filter((key) => !env[key])
+function loadDiscordConfig(env: Record<string, string | undefined>): DiscordAuthConfig {
+  const missing = DISCORD_REQUIRED.filter((key) => !env[key]?.trim())
   if (missing.length > 0) {
     throw new Error(
       `MARKY_AUTH=discord requires the following env vars: ${missing.join(', ')}`,
     )
   }
 
-  const baseUrl = env.MARKY_BASE_URL!.replace(/\/+$/, '')
+  const baseUrl = env.MARKY_BASE_URL!.trim().replace(/\/+$/, '')
 
   return {
     mode: 'discord',
-    clientId: env.DISCORD_CLIENT_ID!,
-    clientSecret: env.DISCORD_CLIENT_SECRET!,
-    guildId: env.DISCORD_GUILD_ID!,
+    clientId: env.DISCORD_CLIENT_ID!.trim(),
+    clientSecret: env.DISCORD_CLIENT_SECRET!.trim(),
+    guildId: env.DISCORD_GUILD_ID!.trim(),
     baseUrl,
-    sessionSecret: env.SESSION_SECRET!,
-    botToken: env.DISCORD_BOT_TOKEN || undefined,
+    sessionSecret: env.SESSION_SECRET!.trim(),
+    botToken: env.DISCORD_BOT_TOKEN?.trim() || undefined,
   }
 }
 
