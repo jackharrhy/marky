@@ -16,15 +16,6 @@ export interface RouterDeps {
 }
 
 export function createRouter(deps: RouterDeps) {
-  const router = createFetchRouter()
-
-  router.get(routes.assets, async ({ request }) => {
-    const response = await assets.fetch(request)
-    return response ?? new Response('Not Found', { status: 404 })
-  })
-
-  router.map(routes.home, home)
-
   if (deps.config.auth.mode === 'discord') {
     if (!deps.sessionStorage) {
       throw new Error('createRouter: sessionStorage is required in discord mode')
@@ -33,28 +24,39 @@ export function createRouter(deps: RouterDeps) {
       secrets: [deps.config.auth.sessionSecret],
       httpOnly: true,
       sameSite: 'Lax',
-      // The session-middleware module insists on a signed cookie. `secrets`
-      // above takes care of that. We only set `secure: true` when serving
-      // over HTTPS so cookies still flow during local http dev/test runs.
+      // Only set `secure: true` when serving over HTTPS so cookies still flow
+      // during local http dev/test runs.
       secure: deps.config.auth.baseUrl.startsWith('https://'),
       maxAge: 60 * 60 * 24 * 7,
       path: '/',
     })
-    const middleware = [
-      session(cookie, deps.sessionStorage),
-      identityMiddleware(),
-    ] as const
+
+    // Apply session + identity middleware to every route so the home route
+    // can read `Identity` to gate access.
+    const router = createFetchRouter({
+      middleware: [session(cookie, deps.sessionStorage), identityMiddleware()] as any,
+    })
+
+    wireCommonRoutes(router)
 
     const auth = createAuthController({ auth: deps.config.auth })
+    router.map(routes.auth.signIn, auth.signIn)
+    router.map(routes.auth.callback, auth.callback)
+    router.map(routes.auth.signOut, auth.signOut)
 
-    // `Router#use` doesn't exist in this version of remix/fetch-router; the
-    // controller objects don't expose a top-level `middleware` slot we can
-    // attach via `router.map`, so we register each action with its own
-    // middleware tuple.
-    router.map(routes.auth.signIn, { middleware, ...auth.signIn } as any)
-    router.map(routes.auth.callback, { middleware, ...auth.callback } as any)
-    router.map(routes.auth.signOut, { middleware, ...auth.signOut } as any)
+    return router
   }
 
+  // Anonymous mode: vanilla router, no session machinery.
+  const router = createFetchRouter()
+  wireCommonRoutes(router)
   return router
+}
+
+function wireCommonRoutes(router: ReturnType<typeof createFetchRouter>) {
+  router.get(routes.assets, async ({ request }) => {
+    const response = await assets.fetch(request)
+    return response ?? new Response('Not Found', { status: 404 })
+  })
+  router.map(routes.home, home)
 }

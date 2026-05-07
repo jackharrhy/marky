@@ -59,4 +59,57 @@ describe('routes', () => {
     // asset server should not serve it.
     assert.notEqual(response.status, 200)
   })
+
+  it('home redirects to /auth/sign-in when discord mode and no session', async () => {
+    const { createMemorySessionStorage } = await import('remix/session/memory-storage')
+    const sessionStorage = createMemorySessionStorage()
+    const discordRouter = createRouter({
+      config: loadConfig({
+        MARKY_AUTH: 'discord',
+        DISCORD_CLIENT_ID: 'cid',
+        DISCORD_CLIENT_SECRET: 'cs',
+        DISCORD_GUILD_ID: 'gid',
+        MARKY_BASE_URL: 'http://localhost',
+        SESSION_SECRET: 'sssh',
+      }),
+      sessionStorage,
+    })
+
+    const response = await discordRouter.fetch(new Request('http://localhost/'))
+    assert.equal(response.status, 302)
+    assert.equal(response.headers.get('location'), '/auth/sign-in')
+  })
+
+  it('home renders editor in discord mode when session has identity', async () => {
+    const { createCookie } = await import('remix/cookie')
+    const { createMemorySessionStorage } = await import('remix/session/memory-storage')
+    const sessionStorage = createMemorySessionStorage()
+    const cookie = createCookie('marky.session', { secrets: ['sssh'] })
+
+    const seed = await sessionStorage.read(null)
+    seed.set('identity', { discordId: '7', name: 'Jack', color: '#205ea6' })
+    const sessionId = await sessionStorage.save(seed)
+    if (!sessionId) throw new Error('expected session id')
+    const cookieHeader = await cookie.serialize(sessionId)
+
+    const discordRouter = createRouter({
+      config: loadConfig({
+        MARKY_AUTH: 'discord',
+        DISCORD_CLIENT_ID: 'cid',
+        DISCORD_CLIENT_SECRET: 'cs',
+        DISCORD_GUILD_ID: 'gid',
+        MARKY_BASE_URL: 'http://localhost',
+        SESSION_SECRET: 'sssh',
+      }),
+      sessionStorage,
+    })
+
+    const response = await discordRouter.fetch(
+      new Request('http://localhost/', { headers: { cookie: cookieHeader } }),
+    )
+    assert.equal(response.status, 200)
+    const body = await response.text()
+    assert.match(body, /editor-app\.tsx/)
+    assert.match(body, /Sign out/)
+  })
 })
