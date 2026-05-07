@@ -11,6 +11,7 @@ import { SocketRoom, type PeerConnection } from '../app/middleware/sockets.ts'
 import { PROSEMIRROR_FRAGMENT_NAME } from '../app/shared/constants.ts'
 import { textToDoc } from '../app/shared/doc-utils.ts'
 import {
+  MESSAGE_TYPE_AWARENESS,
   MESSAGE_TYPE_FILE_LIST,
   MESSAGE_TYPE_OPEN_FILE,
   MESSAGE_TYPE_PERSIST_FILE,
@@ -160,6 +161,39 @@ describe('SocketRoom', () => {
     assert.ok(bFrames.length > 0, 'peer B should receive a subdoc sync from A')
     const { filename } = decodeFileMessage(bFrames[0].subarray(1))
     assert.equal(filename, 'shared.md')
+  })
+
+  it('overwrites awareness user for peers with an identity', async () => {
+    const { Awareness, applyAwarenessUpdate, encodeAwarenessUpdate } = await import(
+      'y-protocols/awareness'
+    )
+
+    // Build a real awareness frame as a peer would: a Y.Doc + Awareness with
+    // a forged user state.
+    const doc = new Y.Doc()
+    const awareness = new Awareness(doc)
+    awareness.setLocalStateField('user', { name: 'forged', color: '#000000' })
+    const update = encodeAwarenessUpdate(awareness, [awareness.clientID])
+
+    const a = new FakePeer()
+    const b = new FakePeer()
+    room.addPeer(a, { name: 'real-jack', color: '#ff0000' })
+    room.addPeer(b)
+
+    await room.receive(a, encodeMessage(MESSAGE_TYPE_AWARENESS, update))
+
+    const frame = b.lastFrameOfType(MESSAGE_TYPE_AWARENESS)
+    assert.ok(frame, 'peer b should receive a broadcasted awareness frame')
+
+    // Apply the broadcast frame into a fresh awareness and confirm the user
+    // was rewritten to peer A's bound identity. The observer's constructor
+    // seeds an empty local state so we look up the source clientID directly.
+    const observerDoc = new Y.Doc()
+    const observer = new Awareness(observerDoc)
+    applyAwarenessUpdate(observer, frame.subarray(1), null)
+    const sourceState = observer.getStates().get(awareness.clientID)
+    assert.ok(sourceState, 'observer should have the source clientID state')
+    assert.deepEqual(sourceState.user, { name: 'real-jack', color: '#ff0000' })
   })
 
   it('does not broadcast to peers who have not opened the file', async () => {

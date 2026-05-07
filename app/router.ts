@@ -1,4 +1,4 @@
-import { createCookie } from 'remix/cookie'
+import type { Cookie } from 'remix/cookie'
 import { createRouter as createFetchRouter } from 'remix/fetch-router'
 import type { SessionStorage } from 'remix/session'
 import { session } from 'remix/session-middleware'
@@ -13,28 +13,25 @@ import { routes } from './routes.ts'
 export interface RouterDeps {
   config: AppConfig
   sessionStorage?: SessionStorage
+  sessionCookie?: Cookie
 }
 
 export function createRouter(deps: RouterDeps) {
   if (deps.config.auth.mode === 'discord') {
-    if (!deps.sessionStorage) {
-      throw new Error('createRouter: sessionStorage is required in discord mode')
+    if (!deps.sessionStorage || !deps.sessionCookie) {
+      throw new Error(
+        'createRouter: sessionStorage and sessionCookie are required in discord mode',
+      )
     }
-    const cookie = createCookie('marky.session', {
-      secrets: [deps.config.auth.sessionSecret],
-      httpOnly: true,
-      sameSite: 'Lax',
-      // Only set `secure: true` when serving over HTTPS so cookies still flow
-      // during local http dev/test runs.
-      secure: deps.config.auth.baseUrl.startsWith('https://'),
-      maxAge: 60 * 60 * 24 * 7,
-      path: '/',
-    })
 
     // Apply session + identity middleware to every route so the home route
-    // can read `Identity` to gate access.
+    // can read `Identity` to gate access. The cookie + storage are owned by
+    // the caller so the WebSocket upgrade can verify the same signed cookie.
     const router = createFetchRouter({
-      middleware: [session(cookie, deps.sessionStorage), identityMiddleware()] as any,
+      middleware: [
+        session(deps.sessionCookie, deps.sessionStorage),
+        identityMiddleware(),
+      ] as any,
     })
 
     wireCommonRoutes(router)

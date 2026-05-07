@@ -24,6 +24,19 @@ function setCookieHeaderToCookie(setCookie: string): string {
   return setCookie.split(';')[0]
 }
 
+// Build the same `Cookie` instance the production server constructs in
+// discord mode, so signed cookies round-trip correctly through tests.
+function makeSessionCookie(secret: string) {
+  return createCookie('marky.session', {
+    secrets: [secret],
+    httpOnly: true,
+    sameSite: 'Lax',
+    secure: false,
+    maxAge: 60 * 60 * 24 * 7,
+    path: '/',
+  })
+}
+
 describe('auth controller', () => {
   let originalFetch: typeof fetch
 
@@ -38,9 +51,11 @@ describe('auth controller', () => {
 
   it('GET /auth/sign-in redirects to Discord with the right params and stores state', async () => {
     const sessionStorage = createMemorySessionStorage()
+    const sessionCookie = makeSessionCookie('test-secret')
     const router = createRouter({
       config: loadConfig(VALID_DISCORD_ENV),
       sessionStorage,
+      sessionCookie,
     })
 
     const response = await router.fetch(new Request('http://localhost/auth/sign-in'))
@@ -61,9 +76,11 @@ describe('auth controller', () => {
 
   it('GET /auth/callback with mismatched state returns 400', async () => {
     const sessionStorage = createMemorySessionStorage()
+    const sessionCookie = makeSessionCookie('test-secret')
     const router = createRouter({
       config: loadConfig(VALID_DISCORD_ENV),
       sessionStorage,
+      sessionCookie,
     })
 
     const response = await router.fetch(
@@ -89,9 +106,11 @@ describe('auth controller', () => {
     }) as typeof fetch
 
     const sessionStorage = createMemorySessionStorage()
+    const sessionCookie = makeSessionCookie('test-secret')
     const router = createRouter({
       config: loadConfig(VALID_DISCORD_ENV),
       sessionStorage,
+      sessionCookie,
     })
 
     // 1. sign-in to plant the state cookie
@@ -134,9 +153,11 @@ describe('auth controller', () => {
     }) as typeof fetch
 
     const sessionStorage = createMemorySessionStorage()
+    const sessionCookie = makeSessionCookie('test-secret')
     const router = createRouter({
       config: loadConfig(VALID_DISCORD_ENV),
       sessionStorage,
+      sessionCookie,
     })
 
     const start = await router.fetch(new Request('http://localhost/auth/sign-in'))
@@ -158,7 +179,9 @@ describe('auth controller', () => {
   it('POST /auth/sign-out unsets identity and redirects to /', async () => {
     const sessionStorage = createMemorySessionStorage()
     const config = loadConfig(VALID_DISCORD_ENV)
-    const router = createRouter({ config, sessionStorage })
+    if (config.auth.mode !== 'discord') throw new Error('test setup wrong')
+    const sessionCookie = makeSessionCookie(config.auth.sessionSecret)
+    const router = createRouter({ config, sessionStorage, sessionCookie })
 
     // Seed a session with an identity directly. We have to construct an
     // equivalent signed cookie ourselves because storage.save returns a raw
@@ -167,16 +190,7 @@ describe('auth controller', () => {
     seed.set('identity', { discordId: '1', name: 'a', color: '#000000' })
     const sessionId = await sessionStorage.save(seed)
     assert.ok(sessionId)
-    if (config.auth.mode !== 'discord') throw new Error('test setup wrong')
-    const cookie = createCookie('marky.session', {
-      secrets: [config.auth.sessionSecret],
-      httpOnly: true,
-      sameSite: 'Lax',
-      secure: false,
-      maxAge: 60 * 60 * 24 * 7,
-      path: '/',
-    })
-    const cookieHeader = await cookie.serialize(sessionId)
+    const cookieHeader = await sessionCookie.serialize(sessionId)
 
     const response = await router.fetch(
       new Request('http://localhost/auth/sign-out', {
