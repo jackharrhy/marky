@@ -12,6 +12,7 @@ import { PROSEMIRROR_FRAGMENT_NAME } from '../app/shared/constants.ts'
 import { textToDoc } from '../app/shared/doc-utils.ts'
 import {
   MESSAGE_TYPE_AWARENESS,
+  MESSAGE_TYPE_DELETE_FILE,
   MESSAGE_TYPE_ERROR,
   MESSAGE_TYPE_FILE_LIST,
   MESSAGE_TYPE_OPEN_FILE,
@@ -445,5 +446,75 @@ describe('SocketRoom', () => {
     assert.equal(fake.commits.length, 1)
     assert.equal(fake.commits[0].kind, 'rename')
     assert.equal(fake.commits[0].message, 'rename old.md → new.md — jack, tim')
+  })
+
+  it('deletes a file and schedules a delete commit', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] })
+
+    const fake = new FakeGitStore()
+    ;(fake as any).repoDir = store.dir
+    const room = new SocketRoom({
+      store,
+      gitStore: fake as unknown as import('../app/data/git-store.ts').GitStore,
+      persistIdleMs: 1000,
+    })
+
+    const peer = new FakePeer()
+    room.addPeer(peer, { name: 'jackharrhy', color: '#0' })
+    await room.receive(peer, encodeMessage(MESSAGE_TYPE_OPEN_FILE, encodeUtf8('goodbye.md')))
+    await store.write('goodbye.md', 'hi') // ensure the file exists on disk
+    peer.received.length = 0
+
+    await room.receive(peer, encodeMessage(MESSAGE_TYPE_DELETE_FILE, encodeUtf8('goodbye.md')))
+
+    assert.equal(room.filenameToSubdoc.has('goodbye.md'), false)
+    assert.equal(await store.read('goodbye.md'), null)
+    const list = peer.lastFrameOfType(MESSAGE_TYPE_FILE_LIST)
+    assert.ok(list)
+
+    t.mock.timers.tick(1001)
+    await room.waitForFlushes()
+
+    assert.equal(fake.commits.length, 1)
+    assert.equal(fake.commits[0].kind, 'delete')
+    assert.equal(fake.commits[0].message, 'delete goodbye.md — jackharrhy')
+  })
+
+  it('collapses rename-then-delete into a single delete commit', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] })
+
+    const fake = new FakeGitStore()
+    ;(fake as any).repoDir = store.dir
+    const room = new SocketRoom({
+      store,
+      gitStore: fake as unknown as import('../app/data/git-store.ts').GitStore,
+      persistIdleMs: 1000,
+    })
+
+    const peer = new FakePeer()
+    room.addPeer(peer, { name: 'jack', color: '#0' })
+    await room.receive(peer, encodeMessage(MESSAGE_TYPE_OPEN_FILE, encodeUtf8('a.md')))
+    await room.receive(peer, encodeRenameFrame('a.md', 'b.md'))
+    await room.receive(peer, encodeMessage(MESSAGE_TYPE_DELETE_FILE, encodeUtf8('b.md')))
+
+    t.mock.timers.tick(1001)
+    await room.waitForFlushes()
+
+    assert.equal(fake.commits.length, 1)
+    assert.equal(fake.commits[0].kind, 'delete')
+    assert.equal(fake.commits[0].message, 'delete b.md — jack')
+  })
+
+  it('delete of an unknown file is a no-op (no error frame)', async () => {
+    const room = new SocketRoom({ store })
+
+    const peer = new FakePeer()
+    room.addPeer(peer, { name: 'jack', color: '#0' })
+
+    peer.received.length = 0
+    await room.receive(peer, encodeMessage(MESSAGE_TYPE_DELETE_FILE, encodeUtf8('ghost.md')))
+
+    const error = peer.lastFrameOfType(MESSAGE_TYPE_ERROR)
+    assert.equal(error, undefined)
   })
 })

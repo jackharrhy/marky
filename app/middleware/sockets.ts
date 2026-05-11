@@ -251,6 +251,31 @@ export class SocketRoom {
       return
     }
 
+    if (messageType === MESSAGE_TYPE_DELETE_FILE) {
+      const filename = decodeUtf8(content)
+      if (!this.filenameToSubdoc.has(filename)) return
+
+      const subdoc = this.filenameToSubdoc.get(filename)!
+      subdoc.destroy()
+      this.filenameToSubdoc.delete(filename)
+      this.filesMap.delete(filename)
+      this.filenameToSubdocAwareness.delete(filename)
+      this.subdocBroadcastHandlers.delete(subdoc)
+      for (const state of this.peers.values()) state.subscriptions.delete(filename)
+
+      try {
+        await this.store.remove(filename)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        this.sendError(peer, `Delete failed: ${message}`)
+        return
+      }
+
+      this.recordPending(filename, peer, { kind: 'delete' })
+      this.broadcastFileList()
+      return
+    }
+
     if (messageType === MESSAGE_TYPE_OPEN_FILE) {
       const filename = decodeUtf8(content)
       let subdoc = this.filenameToSubdoc.get(filename)
@@ -470,7 +495,9 @@ export class SocketRoom {
     }
 
     if (op.kind === 'delete') {
-      console.warn(`marky: delete flush not yet implemented for ${filename}`)
+      if (!this.gitStore) return
+      await this.gitStore.stageDelete({ path: this.relPath(filename) })
+      await this.gitStore.commit(`delete ${filename} — ${editors}`)
       return
     }
   }
