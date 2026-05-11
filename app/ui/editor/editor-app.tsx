@@ -33,6 +33,11 @@ export const EditorApp = clientEntry(
     let currentFilename: string | null = null
     let editorMountedFor: string | null = null
     let awarenessStates = new Map<number, AwarenessClientState>()
+    let contextMenu: { filename: string; x: number; y: number } | null = null
+    let renamingFilename: string | null = null
+    let renameInput: HTMLInputElement | null = null
+    let toast: { text: string; expiresAt: number } | null = null
+    let toastTimer: ReturnType<typeof setTimeout> | null = null
 
     function refresh(): void {
       handle.update().catch(() => {
@@ -73,6 +78,48 @@ export const EditorApp = clientEntry(
       openFile(filename)
     }
 
+    function closeContextMenu(): void {
+      if (contextMenu === null) return
+      contextMenu = null
+      refresh()
+    }
+
+    function openContextMenuFor(filename: string, x: number, y: number): void {
+      contextMenu = { filename, x, y }
+      refresh()
+    }
+
+    function showToast(text: string): void {
+      toast = { text, expiresAt: Date.now() + 4000 }
+      if (toastTimer) clearTimeout(toastTimer)
+      toastTimer = setTimeout(() => {
+        toast = null
+        toastTimer = null
+        refresh()
+      }, 4000)
+      refresh()
+    }
+
+    function submitRename(oldName: string): void {
+      if (!socket || !renameInput) return
+      const raw = renameInput.value.trim()
+      if (!raw) {
+        renamingFilename = null
+        refresh()
+        return
+      }
+      const newName = raw.endsWith(MARKDOWN_EXTENSION) ? raw : `${raw}${MARKDOWN_EXTENSION}`
+      if (newName === oldName) {
+        renamingFilename = null
+        refresh()
+        return
+      }
+      socket.renameFile(oldName, newName)
+      if (currentFilename === oldName) currentFilename = newName
+      renamingFilename = null
+      refresh()
+    }
+
     if (isBrowser) {
       const authMode = handle.props.authMode
       user = authMode.mode === 'discord' ? authMode.identity : getUser()
@@ -92,6 +139,7 @@ export const EditorApp = clientEntry(
           if (filename === currentFilename) mountEditorIfReady(filename)
           refresh()
         },
+        onError: showToast,
       })
       socket.setUser(user)
       awarenessStates = socket.getAllAwarenessStates()
@@ -99,6 +147,15 @@ export const EditorApp = clientEntry(
       handle.signal.addEventListener('abort', () => {
         editor?.destroy()
         socket?.close()
+      })
+    }
+
+    if (isBrowser) {
+      const onGlobalMouseDown = () => closeContextMenu()
+      window.addEventListener('mousedown', onGlobalMouseDown)
+      handle.signal.addEventListener('abort', () => {
+        window.removeEventListener('mousedown', onGlobalMouseDown)
+        if (toastTimer) clearTimeout(toastTimer)
       })
     }
 
@@ -145,16 +202,54 @@ export const EditorApp = clientEntry(
                 const display = file.replace(/\.md$/, '')
                 const viewers = collectViewers(awarenessStates, file)
                 const active = file === currentFilename
+                const isRenaming = renamingFilename === file
                 return (
                   <li
                     key={file}
-                    mix={[fileItemStyle, on('click', () => openFile(file))]}
+                    mix={[
+                      fileItemStyle,
+                      on('click', () => {
+                        if (!isRenaming) openFile(file)
+                      }),
+                      on('contextmenu', (event) => {
+                        event.preventDefault()
+                        openContextMenuFor(file, (event as MouseEvent).clientX, (event as MouseEvent).clientY)
+                      }),
+                    ]}
                     style={{
                       background: active ? 'var(--ui-2)' : undefined,
                       fontWeight: active ? 700 : undefined,
                     }}
                   >
-                    <span>{display}</span>
+                    {isRenaming ? (
+                      <input
+                        type="text"
+                        defaultValue={display}
+                        mix={[
+                          renameInputStyle,
+                          ref<HTMLInputElement>((node) => {
+                            renameInput = node
+                            node.focus()
+                            node.select()
+                          }),
+                          on('keydown', (event) => {
+                            const key = (event as KeyboardEvent).key
+                            if (key === 'Enter') {
+                              event.preventDefault()
+                              submitRename(file)
+                            } else if (key === 'Escape') {
+                              event.preventDefault()
+                              renamingFilename = null
+                              refresh()
+                            }
+                          }),
+                          on('mousedown', (event) => event.stopPropagation()),
+                          on('click', (event) => event.stopPropagation()),
+                        ]}
+                      />
+                    ) : (
+                      <span>{display}</span>
+                    )}
                     {viewers.length > 0 && (
                       <span mix={dotsStyle}>
                         {viewers.map((viewer, idx) => (
@@ -213,6 +308,53 @@ export const EditorApp = clientEntry(
             />
           </section>
         </div>
+
+        {contextMenu && (
+          <div
+            mix={[
+              contextMenuStyle,
+              on('mousedown', (event) => event.stopPropagation()),
+            ]}
+            style={{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }}
+          >
+            <button
+              type="button"
+              mix={[
+                contextMenuItemStyle,
+                on('click', () => {
+                  if (!contextMenu) return
+                  renamingFilename = contextMenu.filename
+                  closeContextMenu()
+                }),
+              ]}
+            >
+              Rename
+            </button>
+            <button
+              type="button"
+              mix={[
+                contextMenuItemStyle,
+                on('click', () => {
+                  if (!contextMenu || !socket) return
+                  const target = contextMenu.filename
+                  closeContextMenu()
+                  if (window.confirm(`Delete ${target}?`)) {
+                    socket.deleteFile(target)
+                    if (currentFilename === target) {
+                      currentFilename = null
+                      editorMountedFor = null
+                    }
+                    refresh()
+                  }
+                }),
+              ]}
+            >
+              Delete
+            </button>
+          </div>
+        )}
+
+        {toast && <div mix={toastStyle}>{toast.text}</div>}
       </div>
     )
   },
@@ -395,4 +537,51 @@ const editorMountStyle = css({
   overflow: 'auto',
   padding: '16px 24px',
   background: 'var(--bg)',
+})
+
+const contextMenuStyle = css({
+  position: 'fixed',
+  zIndex: 100,
+  background: 'var(--bg, #fffcf0)',
+  border: '1px solid #cecdc3',
+  borderRadius: '6px',
+  boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+  padding: '4px',
+  display: 'flex',
+  flexDirection: 'column',
+  minWidth: '140px',
+})
+
+const contextMenuItemStyle = css({
+  padding: '6px 12px',
+  background: 'transparent',
+  border: 'none',
+  textAlign: 'left',
+  cursor: 'pointer',
+  font: 'inherit',
+  borderRadius: '4px',
+  '&:hover': { background: '#f2f0e5' },
+})
+
+const renameInputStyle = css({
+  padding: '2px 4px',
+  border: '1px solid #205ea6',
+  borderRadius: '3px',
+  font: 'inherit',
+  width: '100%',
+  boxSizing: 'border-box',
+})
+
+const toastStyle = css({
+  position: 'fixed',
+  right: '16px',
+  bottom: '16px',
+  zIndex: 200,
+  padding: '10px 14px',
+  background: '#af3029',
+  color: '#fffcf0',
+  borderRadius: '6px',
+  boxShadow: '0 4px 12px rgba(0,0,0,0.18)',
+  maxWidth: '320px',
+  fontSize: '13px',
 })
