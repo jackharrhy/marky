@@ -20,14 +20,18 @@ import { PROSEMIRROR_FRAGMENT_NAME } from '../shared/constants.ts'
 import { docToText, plainTextSchema, textToDoc } from '../shared/doc-utils.ts'
 import {
   MESSAGE_TYPE_AWARENESS,
+  MESSAGE_TYPE_DELETE_FILE,
+  MESSAGE_TYPE_ERROR,
   MESSAGE_TYPE_FILE_LIST,
   MESSAGE_TYPE_OPEN_FILE,
+  MESSAGE_TYPE_RENAME_FILE,
   MESSAGE_TYPE_SUBDOC_AWARENESS,
   MESSAGE_TYPE_SUBDOC_SYNC,
   MESSAGE_TYPE_SYNC,
 } from '../shared/message-types.ts'
 import {
   decodeFileMessage,
+  decodeRenameFrame,
   decodeUtf8,
   encodeFileMessage,
   encodeMessage,
@@ -188,6 +192,62 @@ export class SocketRoom {
           otherPeer.send(frame)
         }
       }
+      return
+    }
+
+    if (messageType === MESSAGE_TYPE_RENAME_FILE) {
+      const { oldName, newName } = decodeRenameFrame(content)
+      try {
+        if (this.filenameToSubdoc.has(newName)) {
+          this.sendError(peer, `Cannot rename: ${newName} already exists.`)
+          return
+        }
+        await this.store.rename({ oldName, newName })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        this.sendError(peer, `Rename failed: ${message}`)
+        return
+      }
+
+      const subdoc = this.filenameToSubdoc.get(oldName)
+      if (!subdoc) {
+        this.sendError(peer, `Rename source not found: ${oldName}`)
+        return
+      }
+
+      // Migrate all keyed entries.
+      this.filenameToSubdoc.delete(oldName)
+      this.filenameToSubdoc.set(newName, subdoc)
+      this.filesMap.delete(oldName)
+      this.filesMap.set(newName, subdoc)
+      const awareness = this.filenameToSubdocAwareness.get(oldName)
+      if (awareness) {
+        this.filenameToSubdocAwareness.delete(oldName)
+        this.filenameToSubdocAwareness.set(newName, awareness)
+      }
+      const pending = this.pendingOps.get(oldName)
+      if (pending) {
+        this.pendingOps.delete(oldName)
+        this.pendingOps.set(newName, pending)
+      }
+      const timer = this.flushTimers.get(oldName)
+      if (timer) {
+        this.flushTimers.delete(oldName)
+        this.flushTimers.set(newName, timer)
+      }
+      for (const state of this.peers.values()) {
+        if (state.subscriptions.delete(oldName)) state.subscriptions.add(newName)
+      }
+      // The broadcaster handler closes over the old filename; rebind it.
+      const oldHandler = this.subdocBroadcastHandlers.get(subdoc)
+      if (oldHandler) {
+        subdoc.off('update', oldHandler)
+        this.subdocBroadcastHandlers.delete(subdoc)
+      }
+      this.ensureSubdocBroadcaster(newName, subdoc)
+
+      this.recordPending(newName, peer, { kind: 'rename', oldName })
+      this.broadcastFileList()
       return
     }
 
@@ -391,9 +451,26 @@ export class SocketRoom {
       return
     }
 
-    // Rename and delete branches come in Tasks 6-7. Stub for now:
-    if (op.kind === 'rename' || op.kind === 'delete') {
-      console.warn(`marky: ${op.kind} flush not yet implemented for ${filename}`)
+    if (op.kind === 'rename') {
+      if (!op.oldName) {
+        console.error(`marky: rename flush for ${filename} missing oldName`)
+        return
+      }
+      const subdoc = this.filenameToSubdoc.get(filename)
+      if (subdoc) await this.persistSubdocToDisk(filename, subdoc)
+      if (!this.gitStore) return
+      // Stage the edit first; the rename is the dominant op for commit kind.
+      await this.gitStore.stageEdit({ path: this.relPath(filename) })
+      await this.gitStore.stageRename({
+        oldPath: this.relPath(op.oldName),
+        newPath: this.relPath(filename),
+      })
+      await this.gitStore.commit(`rename ${op.oldName} → ${filename} — ${editors}`)
+      return
+    }
+
+    if (op.kind === 'delete') {
+      console.warn(`marky: delete flush not yet implemented for ${filename}`)
       return
     }
   }
@@ -433,6 +510,11 @@ export class SocketRoom {
     for (const peer of this.peers.keys()) {
       if (peer !== exclude && peer.isOpen()) peer.send(frame)
     }
+  }
+
+  private sendError(peer: PeerConnection, message: string): void {
+    if (!peer.isOpen()) return
+    peer.send(encodeMessage(MESSAGE_TYPE_ERROR, encodeUtf8(message)))
   }
 
   // If a peer has a server-bound identity, rewrite the awareness `user`
