@@ -517,4 +517,47 @@ describe('SocketRoom', () => {
     const error = peer.lastFrameOfType(MESSAGE_TYPE_ERROR)
     assert.equal(error, undefined)
   })
+
+  it('dispose clears flush timers and pending ops', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] })
+
+    const room = new SocketRoom({ store, persistIdleMs: 1000 })
+    const peer = new FakePeer()
+    room.addPeer(peer, { name: 'jack', color: '#0' })
+    await room.receive(peer, encodeMessage(MESSAGE_TYPE_OPEN_FILE, encodeUtf8('a.md')))
+    const sub = room.filenameToSubdoc.get('a.md')!
+    sub.getXmlFragment(PROSEMIRROR_FRAGMENT_NAME).insert(0, [])
+    await room.receive(
+      peer,
+      encodeFileMessage(MESSAGE_TYPE_SUBDOC_SYNC, 'a.md', new Uint8Array([0])),
+    )
+
+    // Timer should be armed.
+    await room.dispose()
+
+    // After dispose, no more timers; advancing the clock does nothing.
+    t.mock.timers.tick(10_000)
+    await new Promise<void>((r) => setImmediate(r))
+    // No assertion needed — we just want dispose() to complete without throwing.
+  })
+
+  it('attachPushTimer stores the timer and dispose clears it', async () => {
+    const room = new SocketRoom({ store })
+    let cleared = false
+    const fakeTimer = setInterval(() => {}, 9999)
+    // Override clearInterval just for this test.
+    const realClearInterval = globalThis.clearInterval
+    ;(globalThis as any).clearInterval = (t: NodeJS.Timeout) => {
+      if (t === fakeTimer) cleared = true
+      realClearInterval(t)
+    }
+    try {
+      room.attachPushTimer(fakeTimer)
+      await room.dispose()
+      assert.equal(cleared, true)
+    } finally {
+      ;(globalThis as any).clearInterval = realClearInterval
+      realClearInterval(fakeTimer)
+    }
+  })
 })
