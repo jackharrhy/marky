@@ -6,6 +6,8 @@
 // Both sides work with `Uint8Array` so the same code runs in the browser and
 // on the uWebSockets server (which delivers `ArrayBuffer`, not Node `Buffer`).
 
+import { MESSAGE_TYPE_RENAME_FILE } from './message-types.ts'
+
 const textEncoder = new TextEncoder()
 const textDecoder = new TextDecoder()
 
@@ -54,4 +56,28 @@ export function decodeUtf8(bytes: Uint8Array): string {
 
 export function encodeUtf8(text: string): Uint8Array {
   return textEncoder.encode(text)
+}
+
+export function encodeRenameFrame(oldName: string, newName: string): Uint8Array {
+  const oldBytes = textEncoder.encode(oldName)
+  const newBytes = textEncoder.encode(newName)
+  if (oldBytes.length > 0xff) {
+    throw new Error(`oldName too long for wire format (${oldBytes.length} bytes)`)
+  }
+  const out = new Uint8Array(1 + 1 + oldBytes.length + newBytes.length)
+  out[0] = MESSAGE_TYPE_RENAME_FILE
+  out[1] = oldBytes.length
+  out.set(oldBytes, 2)
+  out.set(newBytes, 2 + oldBytes.length)
+  return out
+}
+
+export function decodeRenameFrame(content: Uint8Array): {
+  oldName: string
+  newName: string
+} {
+  const oldLen = content[0]
+  const oldName = textDecoder.decode(content.subarray(1, 1 + oldLen))
+  const newName = textDecoder.decode(content.subarray(1 + oldLen))
+  return { oldName, newName }
 }

@@ -3,9 +3,11 @@ import { describe, it } from 'node:test'
 
 import {
   decodeFileMessage,
+  decodeRenameFrame,
   decodeUtf8,
   encodeFileMessage,
   encodeMessage,
+  encodeRenameFrame,
   encodeUtf8,
   toUint8,
 } from '../app/shared/wire.ts'
@@ -51,5 +53,18 @@ describe('wire format', () => {
     const out = toUint8(buf)
     assert.ok(out instanceof Uint8Array)
     assert.deepEqual(Array.from(out), [1, 2, 3])
+  })
+
+  it('round-trips a rename frame', () => {
+    const frame = encodeRenameFrame('Jack.md', 'Jack-Arthur.md')
+    assert.equal(frame[0], 7)
+    const { oldName, newName } = decodeRenameFrame(frame.subarray(1))
+    assert.equal(oldName, 'Jack.md')
+    assert.equal(newName, 'Jack-Arthur.md')
+  })
+
+  it('rejects rename frames with oldName longer than 255 bytes', () => {
+    const long = 'x'.repeat(300) + '.md'
+    assert.throws(() => encodeRenameFrame(long, 'short.md'), /oldName too long/)
   })
 })
