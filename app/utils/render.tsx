@@ -1,19 +1,25 @@
 import type { RemixNode } from 'remix/ui'
 import { renderToStream } from 'remix/ui/server'
 
-import { loadConfig } from '../config.ts'
-import { createRouter } from '../router.ts'
+import type { createRouter } from '../router.ts'
 
-// One process-wide router for frame resolution. Built lazily so the test
-// harness can construct its own router with overrides without colliding.
-let frameRouter: ReturnType<typeof createRouter> | null = null
-function getFrameRouter() {
-  if (!frameRouter) frameRouter = createRouter({ config: loadConfig() })
-  return frameRouter
+type Router = ReturnType<typeof createRouter>
+
+// The render helper resolves `<Frame>` children by issuing internal
+// `router.fetch(...)` requests. To avoid building a second router (which
+// would duplicate config and, in discord mode, fail without session deps),
+// `server.ts` and any test harness register the real router here at boot.
+let activeRouter: Router | null = null
+
+export function setRenderRouter(router: Router): void {
+  activeRouter = router
 }
 
 export function render(node: RemixNode, request: Request, init?: ResponseInit) {
-  const router = getFrameRouter()
+  if (!activeRouter) {
+    throw new Error('render: no router registered. Call setRenderRouter() at boot.')
+  }
+  const router = activeRouter
   let stream = renderToStream(node, {
     frameSrc: request.url,
     async resolveFrame(src, target) {

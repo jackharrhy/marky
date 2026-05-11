@@ -6,6 +6,7 @@ import { loadConfig } from './app/config.ts'
 import { ContentStore } from './app/data/content-store.ts'
 import { attachSockets } from './app/middleware/sockets.ts'
 import { createRouter } from './app/router.ts'
+import { setRenderRouter } from './app/utils/render.tsx'
 
 const config = loadConfig()
 const store = new ContentStore({ dir: config.contentDir })
@@ -33,6 +34,7 @@ if (config.auth.mode === 'discord') {
 }
 
 const router = createRouter({ config, sessionStorage, sessionCookie })
+setRenderRouter(router)
 
 const server = serve(
   async (request) => {

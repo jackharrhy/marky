@@ -4,8 +4,10 @@ import { describe, it } from 'node:test'
 import { createRouter } from '../app/router.ts'
 import { loadConfig } from '../app/config.ts'
 import { routes } from '../app/routes.ts'
+import { setRenderRouter } from '../app/utils/render.tsx'
 
 const router = createRouter({ config: loadConfig({}) })
+setRenderRouter(router)
 
 describe('routes', () => {
   it('home page returns 200 HTML', async () => {
@@ -77,10 +79,15 @@ describe('routes', () => {
       sessionStorage,
       sessionCookie,
     })
+    setRenderRouter(discordRouter)
 
-    const response = await discordRouter.fetch(new Request('http://localhost/'))
-    assert.equal(response.status, 302)
-    assert.equal(response.headers.get('location'), '/auth/sign-in')
+    try {
+      const response = await discordRouter.fetch(new Request('http://localhost/'))
+      assert.equal(response.status, 302)
+      assert.equal(response.headers.get('location'), '/auth/sign-in')
+    } finally {
+      setRenderRouter(router)
+    }
   })
 
   it('home renders editor in discord mode when session has identity', async () => {
@@ -107,13 +114,18 @@ describe('routes', () => {
       sessionStorage,
       sessionCookie,
     })
+    setRenderRouter(discordRouter)
 
-    const response = await discordRouter.fetch(
-      new Request('http://localhost/', { headers: { cookie: cookieHeader } }),
-    )
-    assert.equal(response.status, 200)
-    const body = await response.text()
-    assert.match(body, /editor-app\.tsx/)
-    assert.match(body, /Sign out/)
+    try {
+      const response = await discordRouter.fetch(
+        new Request('http://localhost/', { headers: { cookie: cookieHeader } }),
+      )
+      assert.equal(response.status, 200)
+      const body = await response.text()
+      assert.match(body, /editor-app\.tsx/)
+      assert.match(body, /Sign out/)
+    } finally {
+      setRenderRouter(router)
+    }
   })
 })

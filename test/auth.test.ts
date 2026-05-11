@@ -7,6 +7,16 @@ import { createMemorySessionStorage } from 'remix/session/memory-storage'
 import { loadConfig } from '../app/config.ts'
 import { _resetRolesCacheForTests } from '../app/data/discord.ts'
 import { createRouter } from '../app/router.ts'
+import { setRenderRouter } from '../app/utils/render.tsx'
+
+// Build a router AND register it as the active render router so any
+// `render(...)` calls (e.g. NotInGuildPage) use this same router instead of
+// looking for a process-wide one that doesn't exist in tests.
+function buildTestRouter(deps: Parameters<typeof createRouter>[0]) {
+  const router = createRouter(deps)
+  setRenderRouter(router)
+  return router
+}
 
 const VALID_DISCORD_ENV = {
   MARKY_AUTH: 'discord',
@@ -52,7 +62,7 @@ describe('auth controller', () => {
   it('GET /auth/sign-in redirects to Discord with the right params and stores state', async () => {
     const sessionStorage = createMemorySessionStorage()
     const sessionCookie = makeSessionCookie('test-secret')
-    const router = createRouter({
+    const router = buildTestRouter({
       config: loadConfig(VALID_DISCORD_ENV),
       sessionStorage,
       sessionCookie,
@@ -77,7 +87,7 @@ describe('auth controller', () => {
   it('GET /auth/callback with mismatched state returns 400', async () => {
     const sessionStorage = createMemorySessionStorage()
     const sessionCookie = makeSessionCookie('test-secret')
-    const router = createRouter({
+    const router = buildTestRouter({
       config: loadConfig(VALID_DISCORD_ENV),
       sessionStorage,
       sessionCookie,
@@ -107,7 +117,7 @@ describe('auth controller', () => {
 
     const sessionStorage = createMemorySessionStorage()
     const sessionCookie = makeSessionCookie('test-secret')
-    const router = createRouter({
+    const router = buildTestRouter({
       config: loadConfig(VALID_DISCORD_ENV),
       sessionStorage,
       sessionCookie,
@@ -154,7 +164,7 @@ describe('auth controller', () => {
 
     const sessionStorage = createMemorySessionStorage()
     const sessionCookie = makeSessionCookie('test-secret')
-    const router = createRouter({
+    const router = buildTestRouter({
       config: loadConfig(VALID_DISCORD_ENV),
       sessionStorage,
       sessionCookie,
@@ -181,7 +191,7 @@ describe('auth controller', () => {
     const config = loadConfig(VALID_DISCORD_ENV)
     if (config.auth.mode !== 'discord') throw new Error('test setup wrong')
     const sessionCookie = makeSessionCookie(config.auth.sessionSecret)
-    const router = createRouter({ config, sessionStorage, sessionCookie })
+    const router = buildTestRouter({ config, sessionStorage, sessionCookie })
 
     // Seed a session with an identity directly. We have to construct an
     // equivalent signed cookie ourselves because storage.save returns a raw
