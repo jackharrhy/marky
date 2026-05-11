@@ -15,6 +15,7 @@ import * as Y from 'yjs'
 
 import type { AppConfig } from '../config.ts'
 import type { ContentStore } from '../data/content-store.ts'
+import type { GitStore } from '../data/git-store.ts'
 import { PROSEMIRROR_FRAGMENT_NAME } from '../shared/constants.ts'
 import { docToText, plainTextSchema, textToDoc } from '../shared/doc-utils.ts'
 import {
@@ -43,6 +44,8 @@ export interface PeerConnection {
 
 export interface SocketsOptions {
   store: ContentStore
+  gitStore?: GitStore
+  persistIdleMs?: number
 }
 
 // Identity bound to a peer when it upgrades through an authenticated session.
@@ -63,6 +66,8 @@ interface PeerState {
 // is a thin wrapper that binds it to uWebSockets.
 export class SocketRoom {
   readonly store: ContentStore
+  readonly gitStore?: GitStore
+  private readonly persistIdleMs: number
   readonly rootDoc: Y.Doc
   private readonly filesMap: Y.Map<Y.Doc>
   readonly filenameToSubdoc = new Map<string, Y.Doc>()
@@ -73,6 +78,8 @@ export class SocketRoom {
 
   constructor(options: SocketsOptions) {
     this.store = options.store
+    this.gitStore = options.gitStore
+    this.persistIdleMs = options.persistIdleMs ?? 60_000
     this.rootDoc = new Y.Doc()
     this.filesMap = this.rootDoc.getMap<Y.Doc>('files')
 
@@ -303,6 +310,7 @@ interface ClientData {
 export interface AttachSocketsOptions {
   store: ContentStore
   config: AppConfig
+  gitStore?: GitStore
   sessionStorage?: SessionStorage
   sessionCookie?: Cookie
   path?: string
@@ -328,7 +336,11 @@ export function attachSockets(
   app: TemplatedApp,
   options: AttachSocketsOptions,
 ): SocketRoom {
-  const room = new SocketRoom({ store: options.store })
+  const room = new SocketRoom({
+    store: options.store,
+    gitStore: options.gitStore,
+    persistIdleMs: options.config.git?.persistIdleMs,
+  })
   let nextClientId = 1
   const path = options.path ?? '/ws'
 
