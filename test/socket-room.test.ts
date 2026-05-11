@@ -12,8 +12,10 @@ import { PROSEMIRROR_FRAGMENT_NAME } from '../app/shared/constants.ts'
 import { textToDoc } from '../app/shared/doc-utils.ts'
 import {
   MESSAGE_TYPE_AWARENESS,
+  MESSAGE_TYPE_ERROR,
   MESSAGE_TYPE_FILE_LIST,
   MESSAGE_TYPE_OPEN_FILE,
+  MESSAGE_TYPE_RENAME_FILE,
   MESSAGE_TYPE_SUBDOC_SYNC,
   MESSAGE_TYPE_SYNC,
 } from '../app/shared/message-types.ts'
@@ -22,6 +24,7 @@ import {
   decodeUtf8,
   encodeFileMessage,
   encodeMessage,
+  encodeRenameFrame,
   encodeUtf8,
 } from '../app/shared/wire.ts'
 import { prosemirrorToYXmlFragment } from 'y-prosemirror'
@@ -359,5 +362,88 @@ describe('SocketRoom', () => {
     // The file exists on disk after the flush (ContentStore created it on open).
     const onDisk = await store.read('hello.md')
     assert.notEqual(onDisk, null)
+  })
+
+  it('renames a subdoc in-memory and on disk, then schedules a rename commit', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] })
+
+    const fake = new FakeGitStore()
+    ;(fake as any).repoDir = store.dir
+    const room = new SocketRoom({
+      store,
+      gitStore: fake as unknown as import('../app/data/git-store.ts').GitStore,
+      persistIdleMs: 1000,
+    })
+
+    const peer = new FakePeer()
+    room.addPeer(peer, { name: 'jackharrhy', color: '#0' })
+    await room.receive(peer, encodeMessage(MESSAGE_TYPE_OPEN_FILE, encodeUtf8('old.md')))
+
+    await room.receive(peer, encodeRenameFrame('old.md', 'new.md'))
+
+    assert.equal(room.filenameToSubdoc.has('old.md'), false)
+    assert.equal(room.filenameToSubdoc.has('new.md'), true)
+    assert.equal(await store.read('old.md'), null)
+    assert.equal(await store.read('new.md'), '')
+
+    t.mock.timers.tick(1001)
+    await room.waitForFlushes()
+
+    assert.equal(fake.commits.length, 1)
+    assert.equal(fake.commits[0].kind, 'rename')
+    assert.equal(fake.commits[0].message, 'rename old.md → new.md — jackharrhy')
+  })
+
+  it('rejects rename when newName already exists, with an ERROR frame to the requester', async () => {
+    const room = new SocketRoom({ store })
+
+    const peer = new FakePeer()
+    room.addPeer(peer, { name: 'jack', color: '#0' })
+    await room.receive(peer, encodeMessage(MESSAGE_TYPE_OPEN_FILE, encodeUtf8('a.md')))
+    await room.receive(peer, encodeMessage(MESSAGE_TYPE_OPEN_FILE, encodeUtf8('b.md')))
+
+    peer.received.length = 0
+    await room.receive(peer, encodeRenameFrame('a.md', 'b.md'))
+
+    const errorFrame = peer.lastFrameOfType(MESSAGE_TYPE_ERROR)
+    assert.ok(errorFrame)
+    const message = decodeUtf8(errorFrame.subarray(1))
+    assert.match(message, /already exists/)
+    assert.equal(room.filenameToSubdoc.has('a.md'), true)
+    assert.equal(room.filenameToSubdoc.has('b.md'), true)
+  })
+
+  it('collapses edit-then-rename into one rename commit with both editors', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] })
+
+    const fake = new FakeGitStore()
+    ;(fake as any).repoDir = store.dir
+    const room = new SocketRoom({
+      store,
+      gitStore: fake as unknown as import('../app/data/git-store.ts').GitStore,
+      persistIdleMs: 1000,
+    })
+
+    const editor = new FakePeer()
+    const renamer = new FakePeer()
+    room.addPeer(editor, { name: 'tim', color: '#0' })
+    room.addPeer(renamer, { name: 'jack', color: '#1' })
+    await room.receive(editor, encodeMessage(MESSAGE_TYPE_OPEN_FILE, encodeUtf8('old.md')))
+    await room.receive(renamer, encodeMessage(MESSAGE_TYPE_OPEN_FILE, encodeUtf8('old.md')))
+
+    const sub = room.filenameToSubdoc.get('old.md')!
+    sub.getXmlFragment(PROSEMIRROR_FRAGMENT_NAME).insert(0, [])
+    await room.receive(
+      editor,
+      encodeFileMessage(MESSAGE_TYPE_SUBDOC_SYNC, 'old.md', new Uint8Array([0])),
+    )
+    await room.receive(renamer, encodeRenameFrame('old.md', 'new.md'))
+
+    t.mock.timers.tick(1001)
+    await room.waitForFlushes()
+
+    assert.equal(fake.commits.length, 1)
+    assert.equal(fake.commits[0].kind, 'rename')
+    assert.equal(fake.commits[0].message, 'rename old.md → new.md — jack, tim')
   })
 })
