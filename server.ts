@@ -4,6 +4,7 @@ import { createFsSessionStorage } from 'remix/session/fs-storage'
 
 import { loadConfig } from './app/config.ts'
 import { ContentStore } from './app/data/content-store.ts'
+import { GitStore } from './app/data/git-store.ts'
 import { attachSockets } from './app/middleware/sockets.ts'
 import { createRouter } from './app/router.ts'
 import { setRenderRouter } from './app/utils/render.tsx'
@@ -11,6 +12,17 @@ import { setRenderRouter } from './app/utils/render.tsx'
 const config = loadConfig()
 const store = new ContentStore({ dir: config.contentDir })
 await store.ensureDir()
+
+let gitStore: GitStore | undefined
+if (config.git) {
+  gitStore = new GitStore({
+    repoDir: config.git.repoDir,
+    authorName: config.git.authorName,
+    authorEmail: config.git.authorEmail,
+    push: config.git.push,
+  })
+  await gitStore.assertRepo()
+}
 
 // In discord mode, the same `Cookie` + `SessionStorage` instances back both
 // the HTTP router (via `session()` middleware) and the WebSocket upgrade
@@ -51,6 +63,7 @@ const server = serve(
 attachSockets(server.app, {
   store,
   config,
+  gitStore,
   sessionStorage,
   sessionCookie,
 })
