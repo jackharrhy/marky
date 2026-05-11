@@ -516,10 +516,22 @@ export class SocketRoom {
     return fullPath.slice(repoDir.length).replace(/^[/\\]+/, '')
   }
 
-  dispose(): void {
+  private _pushTimer?: ReturnType<typeof setInterval>
+
+  attachPushTimer(timer: ReturnType<typeof setInterval>): void {
+    this._pushTimer = timer
+  }
+
+  async dispose(): Promise<void> {
+    // Wait for in-flight flushes so a mid-commit doesn't get orphaned.
+    await this.waitForFlushes()
     for (const timer of this.flushTimers.values()) clearTimeout(timer)
     this.flushTimers.clear()
     this.pendingOps.clear()
+    if (this._pushTimer) {
+      clearInterval(this._pushTimer)
+      this._pushTimer = undefined
+    }
   }
 
   private sendFileList(peer: PeerConnection): void {
@@ -687,6 +699,19 @@ export function attachSockets(
       room.removePeer(ws.getUserData().peer)
     },
   })
+
+  const pushIntervalMs = options.config.git?.pushIntervalMs ?? 0
+  const gitStore = options.gitStore
+  if (gitStore && pushIntervalMs > 0) {
+    const timer = setInterval(async () => {
+      try {
+        if (await gitStore.hasUnpushed()) await gitStore.push()
+      } catch (error) {
+        console.error('marky: git push failed', error)
+      }
+    }, pushIntervalMs)
+    room.attachPushTimer(timer)
+  }
 
   return room
 }

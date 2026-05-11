@@ -60,7 +60,7 @@ const server = serve(
   { port: config.port },
 )
 
-attachSockets(server.app, {
+const room = attachSockets(server.app, {
   store,
   config,
   gitStore,
@@ -74,12 +74,17 @@ console.log(`marky: serving content from ${config.contentDir}`)
 
 let shuttingDown = false
 
-function shutdown() {
+async function shutdown() {
   if (shuttingDown) return
   shuttingDown = true
+  try {
+    await room.dispose()
+  } catch (error) {
+    console.error('marky: error during room dispose:', error)
+  }
   server.close()
   process.exit(0)
 }
 
-process.on('SIGINT', shutdown)
-process.on('SIGTERM', shutdown)
+process.on('SIGINT', () => { shutdown() })
+process.on('SIGTERM', () => { shutdown() })
