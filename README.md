@@ -50,6 +50,15 @@ name and color from a small palette.
 In discord mode, missing required env vars cause the server to exit with a
 list of what's missing before binding the port.
 
+A commented `.env.example` lives at the repo root. Copy it to `.env` for
+local development:
+
+```sh
+cp .env.example .env
+```
+
+`.env` is gitignored.
+
 ### Setting up Discord OAuth (when using `MARKY_AUTH=discord`)
 
 1. Create a new application at <https://discord.com/developers/applications>.
