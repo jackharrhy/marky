@@ -4,7 +4,7 @@ import * as Y from 'yjs'
 import { CollaborativeEditor } from '../../frontend/collaborative-editor.ts'
 import { SocketHandler, type AwarenessClientState } from '../../frontend/socket-handler.ts'
 import { getUser, type User } from '../../frontend/user.ts'
-import { MARKDOWN_EXTENSION, PERSIST_BUTTON_RESET_DELAY_MS } from '../../shared/constants.ts'
+import { MARKDOWN_EXTENSION } from '../../shared/constants.ts'
 
 export interface EditorAppProps extends SerializableProps {
   authMode:
@@ -32,8 +32,6 @@ export const EditorApp = clientEntry(
     let files: string[] = []
     let currentFilename: string | null = null
     let editorMountedFor: string | null = null
-    let persistLabel = 'Persist'
-    let persistResetTimer: ReturnType<typeof setTimeout> | null = null
     let awarenessStates = new Map<number, AwarenessClientState>()
 
     function refresh(): void {
@@ -75,19 +73,6 @@ export const EditorApp = clientEntry(
       openFile(filename)
     }
 
-    function persist(): void {
-      if (!currentFilename || !socket) return
-      socket.persistFile(currentFilename)
-      persistLabel = 'Persisted'
-      refresh()
-      if (persistResetTimer) clearTimeout(persistResetTimer)
-      persistResetTimer = setTimeout(() => {
-        persistLabel = 'Persist'
-        persistResetTimer = null
-        refresh()
-      }, PERSIST_BUTTON_RESET_DELAY_MS)
-    }
-
     if (isBrowser) {
       const authMode = handle.props.authMode
       user = authMode.mode === 'discord' ? authMode.identity : getUser()
@@ -112,7 +97,6 @@ export const EditorApp = clientEntry(
       awarenessStates = socket.getAllAwarenessStates()
 
       handle.signal.addEventListener('abort', () => {
-        if (persistResetTimer) clearTimeout(persistResetTimer)
         editor?.destroy()
         socket?.close()
       })
@@ -208,9 +192,6 @@ export const EditorApp = clientEntry(
                       )
                     : null}
                 </span>
-                <button type="button" mix={[buttonStyle, on('click', persist)]}>
-                  {persistLabel}
-                </button>
               </div>
             ) : (
               <div mix={mainHeaderStyle}>
