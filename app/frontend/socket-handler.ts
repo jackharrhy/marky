@@ -9,7 +9,6 @@ import {
   MESSAGE_TYPE_AWARENESS,
   MESSAGE_TYPE_FILE_LIST,
   MESSAGE_TYPE_OPEN_FILE,
-  MESSAGE_TYPE_PERSIST_FILE,
   MESSAGE_TYPE_SUBDOC_AWARENESS,
   MESSAGE_TYPE_SUBDOC_SYNC,
   MESSAGE_TYPE_SYNC,
@@ -103,10 +102,6 @@ export class SocketHandler {
 
   openFile(filename: string): void {
     this.send(encodeMessage(MESSAGE_TYPE_OPEN_FILE, encodeUtf8(filename)))
-  }
-
-  persistFile(filename: string): void {
-    this.send(encodeMessage(MESSAGE_TYPE_PERSIST_FILE, encodeUtf8(filename)))
   }
 
   getSubdoc(filename: string): Y.Doc | undefined {
