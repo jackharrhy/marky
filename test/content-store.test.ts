@@ -66,4 +66,54 @@ describe('ContentStore', () => {
   it('rejects an empty filename', async () => {
     await assert.rejects(() => store.write('.md', ''), /empty/)
   })
+
+  it('renames a file on disk', async () => {
+    await store.write('alpha.md', 'hello')
+    await store.rename({ oldName: 'alpha.md', newName: 'beta.md' })
+    assert.equal(await store.read('alpha.md'), null)
+    assert.equal(await store.read('beta.md'), 'hello')
+  })
+
+  it('rejects rename when newName already exists', async () => {
+    await store.write('a.md', 'one')
+    await store.write('b.md', 'two')
+    await assert.rejects(
+      () => store.rename({ oldName: 'a.md', newName: 'b.md' }),
+      /already exists/,
+    )
+    assert.equal(await store.read('a.md'), 'one')
+    assert.equal(await store.read('b.md'), 'two')
+  })
+
+  it('rejects rename with unsafe newName', async () => {
+    await store.write('a.md', 'x')
+    await assert.rejects(
+      () => store.rename({ oldName: 'a.md', newName: '../escape.md' }),
+      /path separators/,
+    )
+  })
+
+  it('rejects rename with unsafe oldName', async () => {
+    await assert.rejects(
+      () => store.rename({ oldName: '../escape.md', newName: 'safe.md' }),
+      /path separators/,
+    )
+  })
+
+  it('removes an existing file', async () => {
+    await store.write('to-delete.md', 'bye')
+    await store.remove('to-delete.md')
+    assert.equal(await store.read('to-delete.md'), null)
+  })
+
+  it('remove is a no-op when the file is already gone', async () => {
+    await store.write('once.md', '')
+    await store.remove('once.md')
+    await store.remove('once.md')
+    assert.equal(await store.read('once.md'), null)
+  })
+
+  it('rejects remove with unsafe name', async () => {
+    await assert.rejects(() => store.remove('../escape.md'), /path separators/)
+  })
 })

@@ -56,6 +56,32 @@ export class ContentStore {
     await fs.writeFile(this.filePath(filename), content, 'utf-8')
   }
 
+  async rename(args: { oldName: string; newName: string }): Promise<void> {
+    assertSafeFilename(args.oldName)
+    assertSafeFilename(args.newName)
+    if (args.oldName === args.newName) return
+
+    const newPath = this.filePath(args.newName)
+    try {
+      await fs.access(newPath)
+      throw new Error(`Filename already exists: ${args.newName}`)
+    } catch (error) {
+      if (!isNotFound(error)) throw error
+    }
+
+    await fs.rename(this.filePath(args.oldName), newPath)
+  }
+
+  async remove(filename: string): Promise<void> {
+    assertSafeFilename(filename)
+    try {
+      await fs.unlink(this.filePath(filename))
+    } catch (error) {
+      if (isNotFound(error)) return
+      throw error
+    }
+  }
+
   filePath(filename: string): string {
     return path.join(this.dir, filename)
   }
