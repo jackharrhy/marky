@@ -54,6 +54,12 @@ describe('routes', () => {
     assert.notEqual(response.status, 200)
   })
 
+  it('asset route denies app/data/git-store.ts', async () => {
+    const url = 'http://localhost' + routes.assets.href({ path: 'app/data/git-store.ts' })
+    const response = await router.fetch(new Request(url))
+    assert.notEqual(response.status, 200)
+  })
+
   it('asset route denies app/config.ts', async () => {
     const url = 'http://localhost' + routes.assets.href({ path: 'app/config.ts' })
     const response = await router.fetch(new Request(url))
