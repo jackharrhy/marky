@@ -20,6 +20,7 @@ import {
 import {
   decodeFileMessage,
   decodeUtf8,
+  encodeFileMessage,
   encodeMessage,
   encodeUtf8,
 } from '../app/shared/wire.ts'
@@ -47,6 +48,53 @@ class FakePeer implements PeerConnection {
     const frames = this.framesOfType(type)
     return frames[frames.length - 1]
   }
+}
+
+interface FakeCommit {
+  kind: 'edit' | 'rename' | 'delete'
+  path: string
+  oldPath?: string
+  message: string
+}
+
+class FakeGitStore {
+  readonly commits: FakeCommit[] = []
+  private staged: Array<{ kind: 'edit' | 'rename' | 'delete'; path: string; oldPath?: string }> = []
+
+  async assertRepo(): Promise<void> {}
+
+  async stageEdit(args: { path: string }): Promise<void> {
+    this.staged.push({ kind: 'edit', path: args.path })
+  }
+
+  async stageRename(args: { oldPath: string; newPath: string }): Promise<void> {
+    this.staged.push({ kind: 'rename', path: args.newPath, oldPath: args.oldPath })
+  }
+
+  async stageDelete(args: { path: string }): Promise<void> {
+    this.staged.push({ kind: 'delete', path: args.path })
+  }
+
+  async commit(message: string): Promise<{ sha: string } | null> {
+    if (this.staged.length === 0) return null
+    const dominant = this.staged[this.staged.length - 1]
+    this.commits.push({
+      kind: dominant.kind,
+      path: dominant.path,
+      oldPath: dominant.oldPath,
+      message,
+    })
+    this.staged = []
+    return { sha: 'fake-' + this.commits.length.toString().padStart(40, '0') }
+  }
+
+  async hasUnpushed(): Promise<boolean> {
+    return false
+  }
+
+  async push(): Promise<void> {}
+
+  readonly repoDir: string = '/repo'
 }
 
 describe('SocketRoom', () => {
@@ -196,5 +244,120 @@ describe('SocketRoom', () => {
     }, a)
 
     assert.equal(b.framesOfType(MESSAGE_TYPE_SUBDOC_SYNC).length, 0)
+  })
+
+  it('commits a single editor after the debounce window elapses', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] })
+
+    const fake = new FakeGitStore()
+    ;(fake as any).repoDir = store.dir
+    const room = new SocketRoom({
+      store,
+      gitStore: fake as unknown as import('../app/data/git-store.ts').GitStore,
+      persistIdleMs: 1000,
+    })
+
+    const peer = new FakePeer()
+    room.addPeer(peer, { name: 'jackharrhy', color: '#205ea6' })
+    await room.receive(peer, encodeMessage(MESSAGE_TYPE_OPEN_FILE, encodeUtf8('hello.md')))
+
+    const subdoc = room.filenameToSubdoc.get('hello.md')!
+    // Force the subdoc to have content so persistSubdocToDisk actually writes.
+    subdoc.getXmlFragment(PROSEMIRROR_FRAGMENT_NAME).insert(0, [])
+    await room.receive(
+      peer,
+      encodeFileMessage(MESSAGE_TYPE_SUBDOC_SYNC, 'hello.md', new Uint8Array([0])),
+    )
+
+    t.mock.timers.tick(1001)
+    await room.waitForFlushes()
+
+    assert.equal(fake.commits.length, 1)
+    assert.equal(fake.commits[0].kind, 'edit')
+    assert.equal(fake.commits[0].message, 'edit hello.md — jackharrhy')
+  })
+
+  it('joins multiple editor names alphabetically in the commit message', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] })
+
+    const fake = new FakeGitStore()
+    ;(fake as any).repoDir = store.dir
+    const room = new SocketRoom({
+      store,
+      gitStore: fake as unknown as import('../app/data/git-store.ts').GitStore,
+      persistIdleMs: 1000,
+    })
+
+    const a = new FakePeer()
+    const b = new FakePeer()
+    room.addPeer(a, { name: 'tim', color: '#000' })
+    room.addPeer(b, { name: 'alex', color: '#fff' })
+    await room.receive(a, encodeMessage(MESSAGE_TYPE_OPEN_FILE, encodeUtf8('shared.md')))
+    await room.receive(b, encodeMessage(MESSAGE_TYPE_OPEN_FILE, encodeUtf8('shared.md')))
+
+    const subdoc = room.filenameToSubdoc.get('shared.md')!
+    subdoc.getXmlFragment(PROSEMIRROR_FRAGMENT_NAME).insert(0, [])
+    await room.receive(a, encodeFileMessage(MESSAGE_TYPE_SUBDOC_SYNC, 'shared.md', new Uint8Array([0])))
+    await room.receive(b, encodeFileMessage(MESSAGE_TYPE_SUBDOC_SYNC, 'shared.md', new Uint8Array([0])))
+
+    t.mock.timers.tick(1001)
+    await room.waitForFlushes()
+
+    assert.equal(fake.commits[0].message, 'edit shared.md — alex, tim')
+  })
+
+  it('runs an independent debounce timer per file', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] })
+
+    const fake = new FakeGitStore()
+    ;(fake as any).repoDir = store.dir
+    const room = new SocketRoom({
+      store,
+      gitStore: fake as unknown as import('../app/data/git-store.ts').GitStore,
+      persistIdleMs: 1000,
+    })
+
+    const peer = new FakePeer()
+    room.addPeer(peer, { name: 'jack', color: '#0' })
+
+    for (const filename of ['a.md', 'b.md']) {
+      await room.receive(peer, encodeMessage(MESSAGE_TYPE_OPEN_FILE, encodeUtf8(filename)))
+      const sub = room.filenameToSubdoc.get(filename)!
+      sub.getXmlFragment(PROSEMIRROR_FRAGMENT_NAME).insert(0, [])
+      await room.receive(
+        peer,
+        encodeFileMessage(MESSAGE_TYPE_SUBDOC_SYNC, filename, new Uint8Array([0])),
+      )
+    }
+
+    t.mock.timers.tick(1001)
+    await room.waitForFlushes()
+
+    assert.equal(fake.commits.length, 2)
+    const paths = fake.commits.map((c) => c.path).sort()
+    assert.deepEqual(paths, ['a.md', 'b.md'])
+  })
+
+  it('persists to disk without committing when gitStore is absent', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] })
+
+    const room = new SocketRoom({ store, persistIdleMs: 1000 })
+
+    const peer = new FakePeer()
+    room.addPeer(peer, { name: 'jack', color: '#0' })
+    await room.receive(peer, encodeMessage(MESSAGE_TYPE_OPEN_FILE, encodeUtf8('hello.md')))
+    const sub = room.filenameToSubdoc.get('hello.md')!
+    sub.getXmlFragment(PROSEMIRROR_FRAGMENT_NAME).insert(0, [])
+    await room.receive(
+      peer,
+      encodeFileMessage(MESSAGE_TYPE_SUBDOC_SYNC, 'hello.md', new Uint8Array([0])),
+    )
+
+    t.mock.timers.tick(1001)
+    await room.waitForFlushes()
+
+    // The file exists on disk after the flush (ContentStore created it on open).
+    const onDisk = await store.read('hello.md')
+    assert.notEqual(onDisk, null)
   })
 })

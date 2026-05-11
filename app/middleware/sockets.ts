@@ -61,6 +61,14 @@ interface PeerState {
   identity?: PeerIdentity
 }
 
+type PendingOpKind = 'edit' | 'rename' | 'delete'
+
+interface PendingOp {
+  kind: PendingOpKind
+  editors: Set<string>
+  oldName?: string
+}
+
 // `SocketRoom` owns the shared Yjs doc tree, file list, awareness, and the
 // per-peer subscription bookkeeping. It is transport-agnostic. `attachSockets`
 // is a thin wrapper that binds it to uWebSockets.
@@ -74,6 +82,9 @@ export class SocketRoom {
   readonly filenameToSubdocAwareness = new Map<string, Awareness>()
   private readonly subdocBroadcastHandlers = new Map<Y.Doc, (update: Uint8Array) => void>()
   private readonly peers = new Map<PeerConnection, PeerState>()
+  private readonly pendingOps = new Map<string, PendingOp>()
+  private readonly flushTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  private readonly inFlightFlushes = new Map<string, Promise<void>>()
   private rescanPromise: Promise<void> | null = null
 
   constructor(options: SocketsOptions) {
@@ -153,7 +164,14 @@ export class SocketRoom {
     if (messageType === MESSAGE_TYPE_SUBDOC_SYNC) {
       const { filename, payload } = decodeFileMessage(content)
       const subdoc = this.filenameToSubdoc.get(filename)
-      if (subdoc) Y.applyUpdate(subdoc, payload, peer)
+      if (!subdoc) return
+      try {
+        Y.applyUpdate(subdoc, payload, peer)
+      } catch (error) {
+        // A single malformed frame shouldn't tear the connection down.
+        console.error(`marky: applyUpdate failed for ${filename}:`, error)
+      }
+      this.recordPending(filename, peer, { kind: 'edit' })
       return
     }
 
@@ -272,6 +290,132 @@ export class SocketRoom {
       console.error(`marky: persist failed for ${filename}:`, error)
       return false
     }
+  }
+
+  private recordPending(
+    filename: string,
+    peer: PeerConnection,
+    incoming: { kind: PendingOpKind; oldName?: string },
+  ): void {
+    const editorName = this.editorNameFor(peer, filename)
+    const existing = this.pendingOps.get(filename)
+
+    let kind: PendingOpKind
+    let oldName: string | undefined
+    const editors = existing ? existing.editors : new Set<string>()
+    editors.add(editorName)
+
+    if (!existing) {
+      kind = incoming.kind
+      oldName = incoming.oldName
+    } else if (existing.kind === 'delete') {
+      kind = 'delete'
+      oldName = undefined
+    } else if (incoming.kind === 'delete') {
+      kind = 'delete'
+      oldName = undefined
+    } else if (existing.kind === 'rename') {
+      kind = 'rename'
+      // Preserve the earliest oldName so A -> B -> C becomes a single rename A -> C.
+      oldName = existing.oldName
+    } else if (incoming.kind === 'rename') {
+      kind = 'rename'
+      oldName = incoming.oldName
+    } else {
+      kind = 'edit'
+      oldName = undefined
+    }
+
+    this.pendingOps.set(filename, { kind, editors, oldName })
+    this.scheduleFlush(filename)
+  }
+
+  private scheduleFlush(filename: string): void {
+    const existing = this.flushTimers.get(filename)
+    if (existing) clearTimeout(existing)
+    const timer = setTimeout(() => {
+      this.flushTimers.delete(filename)
+      const promise = this.flush(filename)
+        .catch((error) => {
+          console.error(`marky: flush failed for ${filename}:`, error)
+        })
+        .finally(() => {
+          if (this.inFlightFlushes.get(filename) === promise) {
+            this.inFlightFlushes.delete(filename)
+          }
+        })
+      this.inFlightFlushes.set(filename, promise)
+    }, this.persistIdleMs)
+    this.flushTimers.set(filename, timer)
+  }
+
+  // Wait for any in-flight or pending flushes to settle. Tests fire mocked
+  // timers and then await this to drain the persist/commit pipeline.
+  async waitForFlushes(): Promise<void> {
+    while (this.inFlightFlushes.size > 0) {
+      await Promise.all(this.inFlightFlushes.values())
+    }
+  }
+
+  private editorNameFor(peer: PeerConnection, filename: string): string {
+    const identity = this.peers.get(peer)?.identity
+    if (identity) return identity.name
+
+    // Anonymous mode: pull from the most recent awareness state on this file.
+    const awareness = this.filenameToSubdocAwareness.get(filename)
+    if (awareness) {
+      for (const state of awareness.getStates().values()) {
+        const user = (state as { user?: { name?: string } }).user
+        if (user?.name) return user.name
+      }
+    }
+    return 'unknown'
+  }
+
+  private async flush(filename: string): Promise<void> {
+    const op = this.pendingOps.get(filename)
+    if (!op) return
+    this.pendingOps.delete(filename)
+
+    const editors = Array.from(op.editors).sort().join(', ') || 'unknown'
+
+    if (op.kind === 'edit') {
+      const subdoc = this.filenameToSubdoc.get(filename)
+      if (!subdoc) return
+      const ok = await this.persistSubdocToDisk(filename, subdoc)
+      if (!ok || !this.gitStore) return
+
+      const relPath = this.relPath(filename)
+      await this.gitStore.stageEdit({ path: relPath })
+      await this.gitStore.commit(`edit ${filename} — ${editors}`)
+      return
+    }
+
+    // Rename and delete branches come in Tasks 6-7. Stub for now:
+    if (op.kind === 'rename' || op.kind === 'delete') {
+      console.warn(`marky: ${op.kind} flush not yet implemented for ${filename}`)
+      return
+    }
+  }
+
+  private relPath(filename: string): string {
+    if (!this.gitStore) {
+      throw new Error('relPath called without a gitStore configured')
+    }
+    const repoDir = this.gitStore.repoDir
+    const fullPath = this.store.filePath(filename)
+    if (!fullPath.startsWith(repoDir)) {
+      throw new Error(
+        `marky: content dir ${this.store.dir} is not inside git repo ${repoDir}`,
+      )
+    }
+    return fullPath.slice(repoDir.length).replace(/^[/\\]+/, '')
+  }
+
+  dispose(): void {
+    for (const timer of this.flushTimers.values()) clearTimeout(timer)
+    this.flushTimers.clear()
+    this.pendingOps.clear()
   }
 
   private sendFileList(peer: PeerConnection): void {
