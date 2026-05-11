@@ -14,7 +14,6 @@ import {
   MESSAGE_TYPE_AWARENESS,
   MESSAGE_TYPE_FILE_LIST,
   MESSAGE_TYPE_OPEN_FILE,
-  MESSAGE_TYPE_PERSIST_FILE,
   MESSAGE_TYPE_SUBDOC_SYNC,
   MESSAGE_TYPE_SYNC,
 } from '../app/shared/message-types.ts'
@@ -112,25 +111,6 @@ describe('SocketRoom', () => {
     Y.applyUpdate(local, payload)
     const fragment = local.getXmlFragment(PROSEMIRROR_FRAGMENT_NAME)
     assert.equal(fragment.toString().includes('persisted body'), true)
-  })
-
-  it('persists subdoc edits back to disk', async () => {
-    const peer = new FakePeer()
-    room.addPeer(peer)
-    peer.received.length = 0
-
-    await room.receive(peer, encodeMessage(MESSAGE_TYPE_OPEN_FILE, encodeUtf8('todo.md')))
-
-    // Edit the subdoc directly and broadcast the update through the room.
-    const subdoc = room.filenameToSubdoc.get('todo.md')
-    assert.ok(subdoc, 'subdoc should exist after open')
-    const fragment = subdoc.getXmlFragment(PROSEMIRROR_FRAGMENT_NAME)
-    fragment.delete(0, fragment.length)
-    prosemirrorToYXmlFragment(textToDoc('Buy milk\nWalk dog'), fragment)
-
-    await room.receive(peer, encodeMessage(MESSAGE_TYPE_PERSIST_FILE, encodeUtf8('todo.md')))
-
-    assert.equal(await store.read('todo.md'), 'Buy milk\nWalk dog')
   })
 
   it('broadcasts subdoc edits to subscribed peers', async () => {

@@ -21,7 +21,6 @@ import {
   MESSAGE_TYPE_AWARENESS,
   MESSAGE_TYPE_FILE_LIST,
   MESSAGE_TYPE_OPEN_FILE,
-  MESSAGE_TYPE_PERSIST_FILE,
   MESSAGE_TYPE_SUBDOC_AWARENESS,
   MESSAGE_TYPE_SUBDOC_SYNC,
   MESSAGE_TYPE_SYNC,
@@ -201,18 +200,6 @@ export class SocketRoom {
           }
         }
       }
-      return
-    }
-
-    if (messageType === MESSAGE_TYPE_PERSIST_FILE) {
-      const filename = decodeUtf8(content)
-      const subdoc = this.filenameToSubdoc.get(filename)
-      if (!subdoc) {
-        console.error(`marky: persist requested for unknown file ${filename}`)
-        return
-      }
-      const ok = await this.persistSubdocToDisk(filename, subdoc)
-      if (ok) await this.rescan()
       return
     }
   }
