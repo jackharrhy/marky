@@ -541,6 +541,62 @@ describe('SocketRoom', () => {
     // No assertion needed — we just want dispose() to complete without throwing.
   })
 
+  it('captures the editor name before destroying state on delete', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] })
+
+    const fake = new FakeGitStore()
+    ;(fake as any).repoDir = store.dir
+    const room = new SocketRoom({
+      store,
+      gitStore: fake as unknown as import('../app/data/git-store.ts').GitStore,
+      persistIdleMs: 1000,
+    })
+
+    // Anonymous mode: identity is null, name comes from awareness.
+    const peer = new FakePeer()
+    room.addPeer(peer) // no identity
+
+    await room.receive(peer, encodeMessage(MESSAGE_TYPE_OPEN_FILE, encodeUtf8('to-delete.md')))
+    // Seed the awareness with a user.name for this peer's awareness clientID.
+    const awareness = room.filenameToSubdocAwareness.get('to-delete.md')!
+    awareness.setLocalStateField('user', { name: 'Anonymous Tester', color: '#0' })
+
+    await room.receive(peer, encodeMessage(MESSAGE_TYPE_DELETE_FILE, encodeUtf8('to-delete.md')))
+
+    t.mock.timers.tick(1001)
+    await room.waitForFlushes()
+
+    assert.equal(fake.commits.length, 1)
+    assert.equal(fake.commits[0].kind, 'delete')
+    assert.equal(fake.commits[0].message, 'delete to-delete.md — Anonymous Tester')
+  })
+
+  it('captures the editor name before destroying state on rename', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] })
+
+    const fake = new FakeGitStore()
+    ;(fake as any).repoDir = store.dir
+    const room = new SocketRoom({
+      store,
+      gitStore: fake as unknown as import('../app/data/git-store.ts').GitStore,
+      persistIdleMs: 1000,
+    })
+
+    const peer = new FakePeer()
+    room.addPeer(peer)
+    await room.receive(peer, encodeMessage(MESSAGE_TYPE_OPEN_FILE, encodeUtf8('old.md')))
+    const awareness = room.filenameToSubdocAwareness.get('old.md')!
+    awareness.setLocalStateField('user', { name: 'Anonymous Tester', color: '#0' })
+
+    await room.receive(peer, encodeRenameFrame('old.md', 'new.md'))
+
+    t.mock.timers.tick(1001)
+    await room.waitForFlushes()
+
+    assert.equal(fake.commits.length, 1)
+    assert.equal(fake.commits[0].message, 'rename old.md → new.md — Anonymous Tester')
+  })
+
   it('attachPushTimer stores the timer and dispose clears it', async () => {
     const room = new SocketRoom({ store })
     let cleared = false

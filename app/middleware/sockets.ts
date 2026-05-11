@@ -215,6 +215,10 @@ export class SocketRoom {
         return
       }
 
+      // Pre-capture the editor name from awareness keyed on the OLD filename,
+      // before we migrate the map keys.
+      const editorName = this.editorNameFor(peer, oldName)
+
       // Migrate all keyed entries.
       this.filenameToSubdoc.delete(oldName)
       this.filenameToSubdoc.set(newName, subdoc)
@@ -246,7 +250,7 @@ export class SocketRoom {
       }
       this.ensureSubdocBroadcaster(newName, subdoc)
 
-      this.recordPending(newName, peer, { kind: 'rename', oldName })
+      this.recordPending(newName, peer, { kind: 'rename', oldName, editorName })
       this.broadcastFileList()
       return
     }
@@ -254,6 +258,11 @@ export class SocketRoom {
     if (messageType === MESSAGE_TYPE_DELETE_FILE) {
       const filename = decodeUtf8(content)
       if (!this.filenameToSubdoc.has(filename)) return
+
+      // Capture the editor's display name BEFORE we tear down the awareness
+      // map entry; editorNameFor falls back to awareness for anonymous users
+      // and would otherwise return 'unknown'.
+      const editorName = this.editorNameFor(peer, filename)
 
       const subdoc = this.filenameToSubdoc.get(filename)!
       subdoc.destroy()
@@ -271,7 +280,7 @@ export class SocketRoom {
         return
       }
 
-      this.recordPending(filename, peer, { kind: 'delete' })
+      this.recordPending(filename, peer, { kind: 'delete', editorName })
       this.broadcastFileList()
       return
     }
@@ -380,9 +389,9 @@ export class SocketRoom {
   private recordPending(
     filename: string,
     peer: PeerConnection,
-    incoming: { kind: PendingOpKind; oldName?: string },
+    incoming: { kind: PendingOpKind; oldName?: string; editorName?: string },
   ): void {
-    const editorName = this.editorNameFor(peer, filename)
+    const editorName = incoming.editorName ?? this.editorNameFor(peer, filename)
     const existing = this.pendingOps.get(filename)
 
     let kind: PendingOpKind
