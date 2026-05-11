@@ -43,8 +43,8 @@ name and color from a small palette.
 | `DISCORD_CLIENT_ID` | discord | yes | OAuth client id |
 | `DISCORD_CLIENT_SECRET` | discord | yes | OAuth client secret |
 | `DISCORD_GUILD_ID` | discord | yes | Snowflake of the gated guild |
-| `MARKY_BASE_URL` | discord | yes | External origin (e.g. `https://marky.example.com`); used as the OAuth redirect URI prefix; trailing slashes ignored |
 | `SESSION_SECRET` | discord | yes | Signs the session cookie |
+| `MARKY_BASE_URL` | discord | no | External origin (e.g. `https://marky.example.com`) used as the OAuth redirect URI prefix; defaults to `http://localhost:<PORT>` for local dev; trailing slashes ignored |
 | `DISCORD_BOT_TOKEN` | discord | no | Enables true role color resolution |
 
 In discord mode, missing required env vars cause the server to exit with a
