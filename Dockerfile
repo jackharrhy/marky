@@ -2,12 +2,12 @@
 #
 # Multi-stage Dockerfile for marky.
 #
-# Base image is `node:24-bookworm-slim` (Debian 12, glibc 2.36) because the
-# uWebSockets.js prebuilt binaries are glibc-only and break on Alpine without
-# the `gcompat` shim. Bookworm tracks the same glibc that the upstream uWS
-# binaries are compiled against.
+# Base image is `node:24-trixie-slim` (Debian 13, glibc 2.41). uWebSockets.js
+# prebuilt binaries are glibc-only — Alpine breaks them without `gcompat`, and
+# uWS v20.55+ targets glibc 2.38+ which bookworm (Debian 12, glibc 2.36) no
+# longer satisfies. Trixie is the Debian release uWS itself builds against.
 
-ARG NODE_VERSION=24-bookworm-slim
+ARG NODE_VERSION=24-trixie-slim
 
 # ---- deps ---------------------------------------------------------------------
 # Install npm dependencies in a separate stage so the resulting node_modules
