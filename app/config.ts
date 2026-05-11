@@ -27,7 +27,6 @@ const DISCORD_REQUIRED = [
   'DISCORD_CLIENT_ID',
   'DISCORD_CLIENT_SECRET',
   'DISCORD_GUILD_ID',
-  'MARKY_BASE_URL',
   'SESSION_SECRET',
 ] as const
 
@@ -37,14 +36,19 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     throw new Error(`MARKY_AUTH must be "anonymous" or "discord", got "${mode}"`)
   }
 
+  const port = parsePort(env.PORT)
+
   return {
-    auth: mode === 'anonymous' ? { mode: 'anonymous' } : loadDiscordConfig(env),
-    port: parsePort(env.PORT),
+    auth: mode === 'anonymous' ? { mode: 'anonymous' } : loadDiscordConfig(env, port),
+    port,
     contentDir: parseContentDir(env.MARKY_CONTENT_DIR),
   }
 }
 
-function loadDiscordConfig(env: Record<string, string | undefined>): DiscordAuthConfig {
+function loadDiscordConfig(
+  env: Record<string, string | undefined>,
+  port: number,
+): DiscordAuthConfig {
   const missing = DISCORD_REQUIRED.filter((key) => !env[key]?.trim())
   if (missing.length > 0) {
     throw new Error(
@@ -52,7 +56,10 @@ function loadDiscordConfig(env: Record<string, string | undefined>): DiscordAuth
     )
   }
 
-  const baseUrl = env.MARKY_BASE_URL!.trim().replace(/\/+$/, '')
+  // MARKY_BASE_URL is optional; default to http://localhost:<PORT> for local dev.
+  // Production deployments behind a real hostname need to set it explicitly.
+  const rawBaseUrl = env.MARKY_BASE_URL?.trim()
+  const baseUrl = (rawBaseUrl || `http://localhost:${port}`).replace(/\/+$/, '')
 
   return {
     mode: 'discord',

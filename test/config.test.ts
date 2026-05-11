@@ -62,18 +62,43 @@ describe('loadConfig', () => {
     assert.equal(config.auth.mode === 'discord' && config.auth.botToken, 'bot')
   })
 
-  it('lists every missing var in discord mode', () => {
+  it('lists every missing required var in discord mode', () => {
     assert.throws(
       () => loadConfig({ MARKY_AUTH: 'discord' }),
       (error: Error) => {
         assert.match(error.message, /DISCORD_CLIENT_ID/)
         assert.match(error.message, /DISCORD_CLIENT_SECRET/)
         assert.match(error.message, /DISCORD_GUILD_ID/)
-        assert.match(error.message, /MARKY_BASE_URL/)
         assert.match(error.message, /SESSION_SECRET/)
+        assert.doesNotMatch(error.message, /MARKY_BASE_URL/)
         return true
       },
     )
+  })
+
+  it('defaults MARKY_BASE_URL to http://localhost:<port> when unset', () => {
+    const config = loadConfig({
+      MARKY_AUTH: 'discord',
+      DISCORD_CLIENT_ID: 'cid',
+      DISCORD_CLIENT_SECRET: 'csecret',
+      DISCORD_GUILD_ID: 'gid',
+      SESSION_SECRET: 'sssh',
+    })
+    if (config.auth.mode !== 'discord') throw new Error('unreachable')
+    assert.equal(config.auth.baseUrl, 'http://localhost:44100')
+  })
+
+  it('uses the configured PORT in the default MARKY_BASE_URL', () => {
+    const config = loadConfig({
+      MARKY_AUTH: 'discord',
+      PORT: '8080',
+      DISCORD_CLIENT_ID: 'cid',
+      DISCORD_CLIENT_SECRET: 'csecret',
+      DISCORD_GUILD_ID: 'gid',
+      SESSION_SECRET: 'sssh',
+    })
+    if (config.auth.mode !== 'discord') throw new Error('unreachable')
+    assert.equal(config.auth.baseUrl, 'http://localhost:8080')
   })
 
   it('strips trailing slash from MARKY_BASE_URL', () => {
