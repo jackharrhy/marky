@@ -164,4 +164,98 @@ describe('loadConfig', () => {
     assert.equal(config.auth.baseUrl, 'https://marky.example.com')
     assert.equal(config.auth.botToken, undefined)
   })
+
+  it('does not populate git config when MARKY_GIT_REPO is unset', () => {
+    const config = loadConfig({})
+    assert.equal(config.git, undefined)
+  })
+
+  it('populates git config with sensible defaults when MARKY_GIT_REPO is set', () => {
+    const config = loadConfig({ MARKY_GIT_REPO: '/tmp/repo' })
+    assert.ok(config.git)
+    assert.equal(config.git.repoDir, '/tmp/repo')
+    assert.equal(config.git.authorName, 'marky-bot')
+    assert.equal(config.git.authorEmail, 'marky-bot@localhost')
+    assert.equal(config.git.persistIdleMs, 60_000)
+    assert.equal(config.git.pushIntervalMs, 300_000)
+    assert.equal(config.git.push, undefined)
+  })
+
+  it('derives the git author email from MARKY_BASE_URL host when available', () => {
+    const config = loadConfig({
+      MARKY_AUTH: 'discord',
+      DISCORD_CLIENT_ID: 'cid',
+      DISCORD_CLIENT_SECRET: 'csecret',
+      DISCORD_GUILD_ID: 'gid',
+      SESSION_SECRET: 'sssh',
+      MARKY_BASE_URL: 'https://marky.example.com',
+      MARKY_GIT_REPO: '/tmp/repo',
+    })
+    assert.equal(config.git?.authorEmail, 'marky-bot@marky.example.com')
+  })
+
+  it('honors explicit MARKY_GIT_AUTHOR_NAME and MARKY_GIT_AUTHOR_EMAIL', () => {
+    const config = loadConfig({
+      MARKY_GIT_REPO: '/tmp/repo',
+      MARKY_GIT_AUTHOR_NAME: 'Custom Bot',
+      MARKY_GIT_AUTHOR_EMAIL: 'custom@example.com',
+    })
+    assert.equal(config.git?.authorName, 'Custom Bot')
+    assert.equal(config.git?.authorEmail, 'custom@example.com')
+  })
+
+  it('parses MARKY_PERSIST_IDLE_MS and MARKY_PUSH_INTERVAL_MS as integers', () => {
+    const config = loadConfig({
+      MARKY_GIT_REPO: '/tmp/repo',
+      MARKY_PERSIST_IDLE_MS: '5000',
+      MARKY_PUSH_INTERVAL_MS: '0',
+    })
+    assert.equal(config.git?.persistIdleMs, 5000)
+    assert.equal(config.git?.pushIntervalMs, 0)
+  })
+
+  it('rejects invalid MARKY_PERSIST_IDLE_MS', () => {
+    assert.throws(
+      () => loadConfig({ MARKY_GIT_REPO: '/r', MARKY_PERSIST_IDLE_MS: 'oops' }),
+      /MARKY_PERSIST_IDLE_MS must be a number/,
+    )
+  })
+
+  it('rejects invalid MARKY_PUSH_INTERVAL_MS', () => {
+    assert.throws(
+      () => loadConfig({ MARKY_GIT_REPO: '/r', MARKY_PUSH_INTERVAL_MS: 'oops' }),
+      /MARKY_PUSH_INTERVAL_MS must be a number/,
+    )
+  })
+
+  it('populates push.pat when MARKY_GIT_PUSH=true and MARKY_GIT_PAT is set', () => {
+    const config = loadConfig({
+      MARKY_GIT_REPO: '/tmp/repo',
+      MARKY_GIT_PUSH: 'true',
+      MARKY_GIT_PAT: 'ghp_abc',
+    })
+    assert.deepEqual(config.git?.push, { pat: 'ghp_abc' })
+  })
+
+  it('rejects MARKY_GIT_PUSH=true without MARKY_GIT_PAT', () => {
+    assert.throws(
+      () => loadConfig({ MARKY_GIT_REPO: '/tmp/repo', MARKY_GIT_PUSH: 'true' }),
+      /MARKY_GIT_PUSH=true requires MARKY_GIT_PAT/,
+    )
+  })
+
+  it('rejects MARKY_GIT_PAT when MARKY_GIT_REPO is unset', () => {
+    assert.throws(
+      () => loadConfig({ MARKY_GIT_PAT: 'ghp_abc' }),
+      /MARKY_GIT_PAT requires MARKY_GIT_REPO/,
+    )
+  })
+
+  it('ignores MARKY_GIT_PUSH when set to a falsy value', () => {
+    const config = loadConfig({
+      MARKY_GIT_REPO: '/tmp/repo',
+      MARKY_GIT_PUSH: 'false',
+    })
+    assert.equal(config.git?.push, undefined)
+  })
 })
