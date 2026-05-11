@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx --env-file-if-exists=.env watch server.ts",
+    "dev": "tsx --env-file-if-exists=.env --watch server.ts",
     "start": "tsx --env-file-if-exists=.env server.ts",
     "test": "tsx --test --test-force-exit test/**/*.test.ts",
     "typecheck": "tsc --noEmit"
