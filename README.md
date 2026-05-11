@@ -45,6 +45,13 @@ name and color from a small palette.
 | `DISCORD_GUILD_ID` | discord | yes | Snowflake of the gated guild |
 | `SESSION_SECRET` | discord | yes | Signs the session cookie |
 | `MARKY_BASE_URL` | discord | no | External origin (e.g. `https://marky.example.com`) used as the OAuth redirect URI prefix; defaults to `http://localhost:<PORT>` for local dev; trailing slashes ignored |
+| `MARKY_GIT_REPO` | both | no | Absolute path to a git repo. When set, marky stages and commits via this repo on every flush. When unset, marky only writes files to disk. |
+| `MARKY_GIT_AUTHOR_NAME` | git | no | Commit author name. Default `marky-bot`. |
+| `MARKY_GIT_AUTHOR_EMAIL` | git | no | Commit author email. Default `marky-bot@<MARKY_BASE_URL host>` or `marky-bot@localhost`. |
+| `MARKY_GIT_PUSH` | git | no | `true` to enable periodic push. Requires `MARKY_GIT_PAT`. Default off. |
+| `MARKY_GIT_PAT` | git | when `MARKY_GIT_PUSH=true` | GitHub PAT used for push auth. Never written to disk. |
+| `MARKY_PERSIST_IDLE_MS` | both | no | Per-file debounce window in ms. Default 60000. |
+| `MARKY_PUSH_INTERVAL_MS` | git | no | Periodic push frequency in ms. Default 300000. 0 disables. |
 | `DISCORD_BOT_TOKEN` | discord | no | Enables true role color resolution |
 
 In discord mode, missing required env vars cause the server to exit with a
@@ -85,6 +92,32 @@ MARKY_CONTENT_DIR=~/notes npm start
 
 You can also symlink `content/` to an existing vault — `content` is
 gitignored.
+
+## Persistence
+
+Marky debounces edits per-file. After `MARKY_PERSIST_IDLE_MS` of no edits
+(default 60s), the file is written to disk. When `MARKY_GIT_REPO` is set,
+the write is followed by `git add` + `git commit` in that repo, authored
+as `marky-bot`. The commit message records which editors touched the file
+during the debounce window:
+
+```
+edit Jack.md — jackharrhy
+edit Notes.md — alex, jackharrhy, tim
+rename Jack.md → Jack-Arthur.md — jackharrhy
+delete Old.md — alex
+```
+
+When `MARKY_GIT_PUSH=true` and `MARKY_GIT_PAT` is set, marky also pushes
+HEAD to origin every `MARKY_PUSH_INTERVAL_MS` (default 5 minutes) using
+the PAT to authenticate over HTTPS.
+
+If `MARKY_GIT_REPO` is unset, edits still persist to disk; commits and
+pushes are skipped.
+
+Rename and delete are available via right-click on files in the sidebar.
+Rename uses an inline input; delete asks for confirmation via the
+browser.
 
 ## Development
 

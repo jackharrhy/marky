@@ -107,6 +107,31 @@ rewrites the `user` field of awareness frames via
 `modifyAwarenessUpdate(update, fn)` before broadcasting. Anonymous mode
 trusts client-supplied awareness as before.
 
+## Persistence and Git
+
+Edits to a file debounce for `MARKY_PERSIST_IDLE_MS` (default 60s) before
+being flushed to disk. When `MARKY_GIT_REPO` is set, the flush also runs
+`git add`/`git mv`/`git rm` + `git commit` in that repo, authored as
+`marky-bot` with a message that records the Discord (or anonymous)
+usernames of the editors who touched the file during the debounce window.
+A separate interval (`MARKY_PUSH_INTERVAL_MS`, default 5 min) pushes
+accumulated commits via HTTPS using `MARKY_GIT_PAT` when push is enabled.
+
+`SocketRoom` tracks pending operations per-filename with merge semantics:
+edit + rename + edit collapses to a single rename commit; rename + delete
+collapses to a single delete commit. The pending op's `oldName` is
+preserved across stacked renames so A → B → C produces one
+`rename A.md → C.md` commit.
+
+File rename and delete operations come in over the wire as
+`MESSAGE_TYPE_RENAME_FILE` and `MESSAGE_TYPE_DELETE_FILE`. Failures
+(e.g. rename collisions) are reported to the requesting peer via
+`MESSAGE_TYPE_ERROR`, which the editor surfaces as a toast.
+
+The editor name attribution for a delete or rename is captured BEFORE
+the room mutates state (the awareness map is destroyed during delete /
+migrated during rename, so the captured name has to be taken first).
+
 ## Testing
 
 - Server / router tests use `router.fetch(new Request(...))`
