@@ -7,8 +7,11 @@ import * as Y from 'yjs'
 
 import {
   MESSAGE_TYPE_AWARENESS,
+  MESSAGE_TYPE_DELETE_FILE,
+  MESSAGE_TYPE_ERROR,
   MESSAGE_TYPE_FILE_LIST,
   MESSAGE_TYPE_OPEN_FILE,
+  MESSAGE_TYPE_RENAME_FILE,
   MESSAGE_TYPE_SUBDOC_AWARENESS,
   MESSAGE_TYPE_SUBDOC_SYNC,
   MESSAGE_TYPE_SYNC,
@@ -18,6 +21,7 @@ import {
   decodeUtf8,
   encodeFileMessage,
   encodeMessage,
+  encodeRenameFrame,
   encodeUtf8,
   toUint8,
 } from '../shared/wire.ts'
@@ -28,6 +32,7 @@ export interface SocketHandlerCallbacks {
   onSubdocUpdate: (filename: string, subdoc: Y.Doc) => void
   onAwarenessUpdate?: () => void
   onSubdocAwarenessUpdate?: (filename: string) => void
+  onError?: (message: string) => void
 }
 
 export interface AwarenessClientState {
@@ -102,6 +107,14 @@ export class SocketHandler {
 
   openFile(filename: string): void {
     this.send(encodeMessage(MESSAGE_TYPE_OPEN_FILE, encodeUtf8(filename)))
+  }
+
+  renameFile(oldName: string, newName: string): void {
+    this.send(encodeRenameFrame(oldName, newName))
+  }
+
+  deleteFile(filename: string): void {
+    this.send(encodeMessage(MESSAGE_TYPE_DELETE_FILE, encodeUtf8(filename)))
   }
 
   getSubdoc(filename: string): Y.Doc | undefined {
@@ -205,6 +218,11 @@ export class SocketHandler {
       } catch (error) {
         console.error('marky: failed to parse file list', error)
       }
+      return
+    }
+    if (messageType === MESSAGE_TYPE_ERROR) {
+      const text = decodeUtf8(content)
+      this.callbacks.onError?.(text)
       return
     }
     if (messageType === MESSAGE_TYPE_SUBDOC_SYNC) {
