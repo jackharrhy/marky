@@ -221,6 +221,19 @@ describe('auth controller', () => {
     // header tree shape and the reconciler ends up with a duplicate sign-out
     // form. The actual symptom we hit in prod was two buttons in the bar.
     assert.match(html, /tester/, 'discord identity should be SSR-rendered in the header')
+
+    // Hydration markers must balance. If they don't, the SSR tree shape
+    // differs from what hydration expects and the reconciler can leave
+    // orphaned nodes (exactly the bug that produced the duplicate sign-out
+    // button). This matches how Remix's own framework regression tests
+    // detect that class of bug.
+    const hydrationStarts = html.match(/<!--\s*rmx:h:/g)?.length ?? 0
+    const hydrationEnds = html.match(/<!--\s*\/rmx:h\s*-->/g)?.length ?? 0
+    assert.equal(
+      hydrationStarts,
+      hydrationEnds,
+      `hydration markers must balance; got ${hydrationStarts} starts and ${hydrationEnds} ends`,
+    )
   })
 
   it('POST /auth/sign-out unsets identity and redirects to /', async () => {
