@@ -535,7 +535,7 @@ export class SocketRoom {
 
       const relPath = this.relPath(filename)
       await this.gitStore.stageEdit({ path: relPath })
-      await this.gitStore.commit(`edit ${filename} — ${editors}`)
+      await this.gitStore.commit(`edit ${filename} by ${editors}`)
       return
     }
 
@@ -553,14 +553,14 @@ export class SocketRoom {
         oldPath: this.relPath(op.oldName),
         newPath: this.relPath(filename),
       })
-      await this.gitStore.commit(`rename ${op.oldName} → ${filename} — ${editors}`)
+      await this.gitStore.commit(`rename ${op.oldName} to ${filename} by ${editors}`)
       return
     }
 
     if (op.kind === 'delete') {
       if (!this.gitStore) return
       await this.gitStore.stageDelete({ path: this.relPath(filename) })
-      await this.gitStore.commit(`delete ${filename} — ${editors}`)
+      await this.gitStore.commit(`delete ${filename} by ${editors}`)
       return
     }
   }

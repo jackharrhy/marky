@@ -102,10 +102,10 @@ as `marky-bot`. The commit message records which editors touched the file
 during the debounce window:
 
 ```
-edit Jack.md — jackharrhy
-edit Notes.md — alex, jackharrhy, tim
-rename Jack.md → Jack-Arthur.md — jackharrhy
-delete Old.md — alex
+edit Jack.md by jackharrhy
+edit Notes.md by alex, jackharrhy, tim
+rename Jack.md to Jack-Arthur.md by jackharrhy
+delete Old.md by alex
 ```
 
 When `MARKY_GIT_PUSH=true` and `MARKY_GIT_PAT` is set, marky also pushes

@@ -409,7 +409,7 @@ describe('SocketRoom', () => {
 
     assert.equal(fake.commits.length, 1)
     assert.equal(fake.commits[0].kind, 'edit')
-    assert.equal(fake.commits[0].message, 'edit hello.md — jackharrhy')
+    assert.equal(fake.commits[0].message, 'edit hello.md by jackharrhy')
   })
 
   it('joins multiple editor names alphabetically in the commit message', async (t) => {
@@ -438,7 +438,7 @@ describe('SocketRoom', () => {
     timers.advance(1001)
     await room.waitForFlushes()
 
-    assert.equal(fake.commits[0].message, 'edit shared.md — alex, tim')
+    assert.equal(fake.commits[0].message, 'edit shared.md by alex, tim')
   })
 
   it('runs an independent debounce timer per file', async (t) => {
@@ -523,7 +523,7 @@ describe('SocketRoom', () => {
 
     assert.equal(fake.commits.length, 1)
     assert.equal(fake.commits[0].kind, 'rename')
-    assert.equal(fake.commits[0].message, 'rename old.md → new.md — jackharrhy')
+    assert.equal(fake.commits[0].message, 'rename old.md to new.md by jackharrhy')
   })
 
   it('rejects rename when newName already exists, with an ERROR frame to the requester', async () => {
@@ -576,7 +576,7 @@ describe('SocketRoom', () => {
 
     assert.equal(fake.commits.length, 1)
     assert.equal(fake.commits[0].kind, 'rename')
-    assert.equal(fake.commits[0].message, 'rename old.md → new.md — jack, tim')
+    assert.equal(fake.commits[0].message, 'rename old.md to new.md by jack, tim')
   })
 
   it('deletes a file and schedules a delete commit', async (t) => {
@@ -608,7 +608,7 @@ describe('SocketRoom', () => {
 
     assert.equal(fake.commits.length, 1)
     assert.equal(fake.commits[0].kind, 'delete')
-    assert.equal(fake.commits[0].message, 'delete goodbye.md — jackharrhy')
+    assert.equal(fake.commits[0].message, 'delete goodbye.md by jackharrhy')
   })
 
   it('collapses rename-then-delete into a single delete commit', async (t) => {
@@ -633,7 +633,7 @@ describe('SocketRoom', () => {
 
     assert.equal(fake.commits.length, 1)
     assert.equal(fake.commits[0].kind, 'delete')
-    assert.equal(fake.commits[0].message, 'delete b.md — jack')
+    assert.equal(fake.commits[0].message, 'delete b.md by jack')
   })
 
   it('delete of an unknown file is a no-op (no error frame)', async () => {
@@ -699,7 +699,7 @@ describe('SocketRoom', () => {
 
     assert.equal(fake.commits.length, 1)
     assert.equal(fake.commits[0].kind, 'delete')
-    assert.equal(fake.commits[0].message, 'delete to-delete.md — Anonymous Tester')
+    assert.equal(fake.commits[0].message, 'delete to-delete.md by Anonymous Tester')
   })
 
   it('captures the editor name before destroying state on rename', async (t) => {
@@ -725,7 +725,7 @@ describe('SocketRoom', () => {
     await room.waitForFlushes()
 
     assert.equal(fake.commits.length, 1)
-    assert.equal(fake.commits[0].message, 'rename old.md → new.md — Anonymous Tester')
+    assert.equal(fake.commits[0].message, 'rename old.md to new.md by Anonymous Tester')
   })
 
   it('converges concurrent edits from two peers in the authoritative subdoc', async () => {

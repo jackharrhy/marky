@@ -271,7 +271,7 @@ export const EditorApp = clientEntry(
                   </li>
                 )
               })}
-              {files.length === 0 && <li mix={emptyHintStyle}>No files yet — create one above.</li>}
+              {files.length === 0 && <li mix={emptyHintStyle}>No files yet. Create one above.</li>}
             </ul>
           </aside>
 

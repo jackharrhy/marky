@@ -64,20 +64,20 @@ describe('GitStore', () => {
     const store = newStore(repoDir)
     await fs.writeFile(path.join(repoDir, 'content', 'alpha.md'), 'hello\n')
     await store.stageEdit({ path: 'content/alpha.md' })
-    const result = await store.commit('edit alpha.md — jackharrhy')
+    const result = await store.commit('edit alpha.md by jackharrhy')
     assert.ok(result)
     assert.match(result.sha, /^[0-9a-f]{40}$/)
 
     const git = simpleGit(repoDir)
     const log = await git.log({ maxCount: 1 })
-    assert.equal(log.latest?.message, 'edit alpha.md — jackharrhy')
+    assert.equal(log.latest?.message, 'edit alpha.md by jackharrhy')
     assert.equal(log.latest?.author_name, 'marky-bot')
     assert.equal(log.latest?.author_email, 'marky-bot@test')
   })
 
   it('commit returns null when there is nothing staged', async () => {
     const store = newStore(repoDir)
-    const result = await store.commit('edit nothing.md — nobody')
+    const result = await store.commit('edit nothing.md by nobody')
     assert.equal(result, null)
   })
 
@@ -87,7 +87,7 @@ describe('GitStore', () => {
       oldPath: 'content/seed.md',
       newPath: 'content/renamed.md',
     })
-    await store.commit('rename seed.md → renamed.md — jackharrhy')
+    await store.commit('rename seed.md to renamed.md by jackharrhy')
 
     const git = simpleGit(repoDir)
     const summary = await git.raw(['diff-tree', '--name-status', '-r', '-M', 'HEAD'])
@@ -97,7 +97,7 @@ describe('GitStore', () => {
   it('stageDelete + commit records the deletion', async () => {
     const store = newStore(repoDir)
     await store.stageDelete({ path: 'content/seed.md' })
-    await store.commit('delete seed.md — jackharrhy')
+    await store.commit('delete seed.md by jackharrhy')
 
     const git = simpleGit(repoDir)
     const summary = await git.raw(['diff-tree', '--name-status', '-r', 'HEAD'])
@@ -108,7 +108,7 @@ describe('GitStore', () => {
     const store = newStore(repoDir)
     await fs.writeFile(path.join(repoDir, 'content', 'a.md'), 'x')
     await store.stageEdit({ path: 'content/a.md' })
-    await store.commit('edit a.md — jackharrhy')
+    await store.commit('edit a.md by jackharrhy')
 
     const git = simpleGit(repoDir)
     const localName = (await git.raw(['config', '--local', 'user.name'])).trim()
@@ -121,7 +121,7 @@ describe('GitStore', () => {
     const store = newStore(repoDir)
     await fs.writeFile(path.join(repoDir, 'content', 'a.md'), 'x')
     await store.stageEdit({ path: 'content/a.md' })
-    await store.commit('edit a.md — jackharrhy')
+    await store.commit('edit a.md by jackharrhy')
     assert.equal(await store.hasUnpushed(), true)
   })
 
