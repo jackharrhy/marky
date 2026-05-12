@@ -6,6 +6,7 @@ import {
   applyAwarenessUpdate,
   encodeAwarenessUpdate,
   modifyAwarenessUpdate,
+  removeAwarenessStates,
 } from 'y-protocols/awareness'
 import {
   prosemirrorToYXmlFragment,
@@ -63,6 +64,10 @@ export interface PeerIdentity {
 interface PeerState {
   subscriptions: Set<string>
   identity?: PeerIdentity
+  // Awareness clientIDs this peer has published, per filename. We track these
+  // so we can purge stale states from each subdoc's Awareness when the peer
+  // disconnects — otherwise survivors keep seeing the leaver's cursor.
+  awarenessClientIds: Map<string, Set<number>>
 }
 
 type PendingOpKind = 'edit' | 'rename' | 'delete'
@@ -142,12 +147,27 @@ export class SocketRoom {
   // ---- Peer connect / disconnect ---------------------------------------------
 
   addPeer(peer: PeerConnection, identity?: PeerIdentity): void {
-    this.peers.set(peer, { subscriptions: new Set(), identity })
+    this.peers.set(peer, {
+      subscriptions: new Set(),
+      identity,
+      awarenessClientIds: new Map(),
+    })
     peer.send(encodeMessage(MESSAGE_TYPE_SYNC, Y.encodeStateAsUpdate(this.rootDoc)))
     this.sendFileList(peer)
   }
 
   removePeer(peer: PeerConnection): void {
+    const state = this.peers.get(peer)
+    if (state) {
+      // Purge this peer's awareness clientIDs from every subdoc's Awareness
+      // so survivors stop seeing the leaver's ghost cursor.
+      for (const [filename, ids] of state.awarenessClientIds) {
+        const awareness = this.filenameToSubdocAwareness.get(filename)
+        if (awareness && ids.size > 0) {
+          removeAwarenessStates(awareness, [...ids], peer)
+        }
+      }
+    }
     this.peers.delete(peer)
   }
 
@@ -190,7 +210,21 @@ export class SocketRoom {
       if (!subdoc) return
       const awareness = this.ensureSubdocAwareness(filename, subdoc)
       const stamped = this.stampIdentity(peer, payload)
+      const before = new Set(awareness.getStates().keys())
       applyAwarenessUpdate(awareness, stamped, peer)
+      // Track which clientIDs belong to this peer so we can purge them on
+      // disconnect.
+      const peerState = this.peers.get(peer)
+      if (peerState) {
+        let ids = peerState.awarenessClientIds.get(filename)
+        if (!ids) {
+          ids = new Set()
+          peerState.awarenessClientIds.set(filename, ids)
+        }
+        for (const id of awareness.getStates().keys()) {
+          if (!before.has(id)) ids.add(id)
+        }
+      }
       const frame = encodeFileMessage(MESSAGE_TYPE_SUBDOC_AWARENESS, filename, stamped)
       for (const [otherPeer, state] of this.peers) {
         if (otherPeer !== peer && state.subscriptions.has(filename) && otherPeer.isOpen()) {
@@ -247,6 +281,11 @@ export class SocketRoom {
       }
       for (const state of this.peers.values()) {
         if (state.subscriptions.delete(oldName)) state.subscriptions.add(newName)
+        const ids = state.awarenessClientIds.get(oldName)
+        if (ids) {
+          state.awarenessClientIds.delete(oldName)
+          state.awarenessClientIds.set(newName, ids)
+        }
       }
       // The broadcaster handler closes over the old filename; rebind it.
       const oldHandler = this.subdocBroadcastHandlers.get(subdoc)
@@ -277,7 +316,10 @@ export class SocketRoom {
       this.filenameToSubdocAwareness.delete(filename)
       this.loadedFromDisk.delete(filename)
       this.subdocBroadcastHandlers.delete(subdoc)
-      for (const state of this.peers.values()) state.subscriptions.delete(filename)
+      for (const state of this.peers.values()) {
+        state.subscriptions.delete(filename)
+        state.awarenessClientIds.delete(filename)
+      }
 
       try {
         await this.store.remove(filename)

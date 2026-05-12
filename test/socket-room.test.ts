@@ -17,6 +17,7 @@ import {
   MESSAGE_TYPE_FILE_LIST,
   MESSAGE_TYPE_OPEN_FILE,
   MESSAGE_TYPE_RENAME_FILE,
+  MESSAGE_TYPE_SUBDOC_AWARENESS,
   MESSAGE_TYPE_SUBDOC_SYNC,
   MESSAGE_TYPE_SYNC,
 } from '../app/shared/message-types.ts'
@@ -141,6 +142,43 @@ describe('SocketRoom', () => {
     assert.ok(list)
     const files = JSON.parse(decodeUtf8(list.subarray(1))) as string[]
     assert.deepEqual(files.sort(), ['alpha.md', 'beta.md'])
+  })
+
+  it('picks up files added to disk on rescan', async () => {
+    // Initial rescan with nothing on disk.
+    await room.rescan()
+    assert.equal(room.filenameToSubdoc.has('appeared.md'), false)
+
+    // A new file appears outside the running room (e.g. somebody scped it in).
+    await store.write('appeared.md', 'content from outside')
+    await room.rescan()
+
+    assert.equal(room.filenameToSubdoc.has('appeared.md'), true)
+  })
+
+  it('removes files deleted from disk on rescan', async () => {
+    await store.write('doomed.md', 'short-lived')
+    await room.rescan()
+    assert.equal(room.filenameToSubdoc.has('doomed.md'), true)
+
+    // File disappears outside the running room.
+    await store.remove('doomed.md')
+    await room.rescan()
+
+    assert.equal(room.filenameToSubdoc.has('doomed.md'), false)
+    // Awareness and loaded-from-disk tracking must be cleared too, otherwise
+    // a future file with the same name would inherit stale state.
+    assert.equal(room.filenameToSubdocAwareness.has('doomed.md'), false)
+  })
+
+  it('coalesces concurrent rescans into a single promise', async () => {
+    await store.write('one.md', '')
+    // Calling rescan() twice while the first is still pending must return
+    // the same promise so we don't pound the filesystem.
+    const first = room.rescan()
+    const second = room.rescan()
+    assert.equal(first, second)
+    await first
   })
 
   it('opens an existing file with its persisted contents', async () => {
@@ -289,6 +327,36 @@ describe('SocketRoom', () => {
     const sourceState = observer.getStates().get(awareness.clientID)
     assert.ok(sourceState, 'observer should have the source clientID state')
     assert.deepEqual(sourceState.user, { name: 'real-jack', color: '#ff0000' })
+  })
+
+  it('does NOT rewrite awareness user when the peer has no bound identity', async () => {
+    // Companion to the previous test: in anonymous mode the server trusts
+    // client-supplied awareness because there's no identity to enforce.
+    const { Awareness, applyAwarenessUpdate, encodeAwarenessUpdate } = await import(
+      'y-protocols/awareness'
+    )
+
+    const doc = new Y.Doc()
+    const awareness = new Awareness(doc)
+    awareness.setLocalStateField('user', { name: 'Anonymous Leek', color: '#aabbcc' })
+    const update = encodeAwarenessUpdate(awareness, [awareness.clientID])
+
+    const a = new FakePeer()
+    const b = new FakePeer()
+    room.addPeer(a) // no identity
+    room.addPeer(b)
+
+    await room.receive(a, encodeMessage(MESSAGE_TYPE_AWARENESS, update))
+
+    const frame = b.lastFrameOfType(MESSAGE_TYPE_AWARENESS)
+    assert.ok(frame)
+
+    const observerDoc = new Y.Doc()
+    const observer = new Awareness(observerDoc)
+    applyAwarenessUpdate(observer, frame.subarray(1), null)
+    const sourceState = observer.getStates().get(awareness.clientID)
+    assert.ok(sourceState)
+    assert.deepEqual(sourceState.user, { name: 'Anonymous Leek', color: '#aabbcc' })
   })
 
   it('does not broadcast to peers who have not opened the file', async () => {
@@ -658,6 +726,131 @@ describe('SocketRoom', () => {
 
     assert.equal(fake.commits.length, 1)
     assert.equal(fake.commits[0].message, 'rename old.md → new.md — Anonymous Tester')
+  })
+
+  it('converges concurrent edits from two peers in the authoritative subdoc', async () => {
+    // The CRDT correctness contract: two peers can edit the same file
+    // independently and the server's subdoc must contain both contributions.
+    // We simulate the real wire shape: each peer holds a local Y.Doc seeded
+    // from the server's initial SUBDOC_SYNC, makes a local change, and ships
+    // the resulting update back via SUBDOC_SYNC.
+
+    await store.write('shared.md', '')
+    await room.rescan()
+
+    const a = new FakePeer()
+    const b = new FakePeer()
+    room.addPeer(a)
+    room.addPeer(b)
+
+    await room.receive(a, encodeMessage(MESSAGE_TYPE_OPEN_FILE, encodeUtf8('shared.md')))
+    await room.receive(b, encodeMessage(MESSAGE_TYPE_OPEN_FILE, encodeUtf8('shared.md')))
+
+    // Find the initial SUBDOC_SYNC each peer got back from OPEN_FILE.
+    const aInitial = a.lastFrameOfType(MESSAGE_TYPE_SUBDOC_SYNC)!
+    const bInitial = b.lastFrameOfType(MESSAGE_TYPE_SUBDOC_SYNC)!
+
+    // Each peer builds a local doc seeded with the server's state.
+    const aDoc = new Y.Doc()
+    const bDoc = new Y.Doc()
+    Y.applyUpdate(aDoc, decodeFileMessage(aInitial.subarray(1)).payload)
+    Y.applyUpdate(bDoc, decodeFileMessage(bInitial.subarray(1)).payload)
+
+    // Peer A inserts text. Capture the resulting update.
+    let aUpdate: Uint8Array = new Uint8Array()
+    aDoc.on('update', (u: Uint8Array) => { aUpdate = u })
+    aDoc.transact(() => {
+      const fragment = aDoc.getXmlFragment(PROSEMIRROR_FRAGMENT_NAME)
+      prosemirrorToYXmlFragment(textToDoc('AAA from peer A'), fragment)
+    })
+
+    // Peer B inserts different text concurrently — without seeing A's update.
+    let bUpdate: Uint8Array = new Uint8Array()
+    bDoc.on('update', (u: Uint8Array) => { bUpdate = u })
+    bDoc.transact(() => {
+      const fragment = bDoc.getXmlFragment(PROSEMIRROR_FRAGMENT_NAME)
+      prosemirrorToYXmlFragment(textToDoc('BBB from peer B'), fragment)
+    })
+
+    // Both peers ship their updates back to the server.
+    await room.receive(a, encodeFileMessage(MESSAGE_TYPE_SUBDOC_SYNC, 'shared.md', aUpdate))
+    await room.receive(b, encodeFileMessage(MESSAGE_TYPE_SUBDOC_SYNC, 'shared.md', bUpdate))
+
+    // Server's authoritative subdoc must contain both contributions.
+    const server = room.filenameToSubdoc.get('shared.md')!
+    const fragmentText = server.getXmlFragment(PROSEMIRROR_FRAGMENT_NAME).toString()
+    assert.equal(fragmentText.includes('AAA from peer A'), true, 'A\'s edit must be present')
+    assert.equal(fragmentText.includes('BBB from peer B'), true, 'B\'s edit must be present')
+  })
+
+  it('removePeer stops broadcasting to that peer', async () => {
+    await store.write('shared.md', '')
+    await room.rescan()
+
+    const survivor = new FakePeer()
+    const leaver = new FakePeer()
+    room.addPeer(survivor)
+    room.addPeer(leaver)
+
+    await room.receive(survivor, encodeMessage(MESSAGE_TYPE_OPEN_FILE, encodeUtf8('shared.md')))
+    await room.receive(leaver, encodeMessage(MESSAGE_TYPE_OPEN_FILE, encodeUtf8('shared.md')))
+
+    room.removePeer(leaver)
+
+    survivor.received.length = 0
+    leaver.received.length = 0
+
+    // An edit happens. The leaver must NOT receive any broadcast.
+    const subdoc = room.filenameToSubdoc.get('shared.md')!
+    subdoc.transact(() => {
+      const fragment = subdoc.getXmlFragment(PROSEMIRROR_FRAGMENT_NAME)
+      prosemirrorToYXmlFragment(textToDoc('after leaver left'), fragment)
+    }, survivor)
+
+    assert.equal(leaver.framesOfType(MESSAGE_TYPE_SUBDOC_SYNC).length, 0)
+    assert.ok(survivor.framesOfType(MESSAGE_TYPE_SUBDOC_SYNC).length > 0)
+  })
+
+  it('removePeer purges the peer\'s awareness states from every subdoc', async () => {
+    // Without this cleanup, every disconnected client leaks an awareness
+    // clientID into every subdoc they touched — survivors keep seeing the
+    // ghost cursor forever.
+    const { Awareness, encodeAwarenessUpdate } = await import('y-protocols/awareness')
+
+    await store.write('shared.md', '')
+    await room.rescan()
+
+    const survivor = new FakePeer()
+    const leaver = new FakePeer()
+    room.addPeer(survivor)
+    room.addPeer(leaver)
+
+    await room.receive(survivor, encodeMessage(MESSAGE_TYPE_OPEN_FILE, encodeUtf8('shared.md')))
+    await room.receive(leaver, encodeMessage(MESSAGE_TYPE_OPEN_FILE, encodeUtf8('shared.md')))
+
+    // The leaver publishes awareness with a known clientID.
+    const leaverDoc = new Y.Doc()
+    const leaverAwareness = new Awareness(leaverDoc)
+    leaverAwareness.setLocalStateField('user', { name: 'leaver', color: '#000' })
+    const update = encodeAwarenessUpdate(leaverAwareness, [leaverAwareness.clientID])
+    await room.receive(
+      leaver,
+      encodeFileMessage(MESSAGE_TYPE_SUBDOC_AWARENESS, 'shared.md', update),
+    )
+
+    const serverAwareness = room.filenameToSubdocAwareness.get('shared.md')!
+    assert.ok(
+      serverAwareness.getStates().has(leaverAwareness.clientID),
+      'server should have the leaver\'s awareness state before disconnect',
+    )
+
+    room.removePeer(leaver)
+
+    assert.equal(
+      serverAwareness.getStates().has(leaverAwareness.clientID),
+      false,
+      'leaver\'s awareness state should be purged from the subdoc after disconnect',
+    )
   })
 
   it('rebinds the subdoc broadcaster to newName after rename', async () => {
