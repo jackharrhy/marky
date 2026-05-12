@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "tsx --env-file-if-exists=.env --watch server.ts",
     "start": "tsx --env-file-if-exists=.env server.ts",
-    "test": "tsx --test --test-force-exit test/**/*.test.ts",
+    "test": "remix test",
+    "test:watch": "remix test --watch",
     "typecheck": "tsc --noEmit"
   },
   "engines": {
@@ -27,6 +28,7 @@
   },
   "devDependencies": {
     "@types/node": "latest",
+    "playwright": "^1.60.0",
     "typescript": "latest"
   }
 }

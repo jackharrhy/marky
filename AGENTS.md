@@ -9,7 +9,8 @@ than a separate Node `http` server.
 ```sh
 npm i
 npm start
-npm test
+npm test                     # remix test, runs coverage by default
+npm run test:watch           # re-run on file changes
 npm run typecheck
 ```
 
@@ -49,7 +50,7 @@ Refer to ./.agents/skills/remix/SKILL.md
 - `app/ui/editor/` — editor page + `EditorApp` client entry
 - `app/utils/render.tsx` — JSX -> streamed HTML response
 - `content/` — markdown files (gitignored except `.gitkeep`)
-- `test/` — `node:test` suites
+- `test/` — `remix/test` suites (configured by `remix-test.config.ts`)
 - `server.ts` — boots Remix + calls `attachSockets`
 
 ## Wire Protocol
@@ -134,11 +135,17 @@ migrated during rename, so the captured name has to be taken first).
 
 ## Testing
 
-- Server / router tests use `router.fetch(new Request(...))`
+- Use `describe`/`it` from `remix/test` and `* as assert from 'remix/assert'`.
+  The runner is `remix test`, configured by `remix-test.config.ts`. Coverage
+  is on by default; thresholds are 80/80/70/80 for stmts/lines/branches/fns.
+- For time-dependent code (the persist debounce, the push interval) use
+  `t.useFakeTimers()` and `timers.advance(ms)`. There is no `tick` method.
+- Server / router tests use `router.fetch(new Request(...))`.
 - `SocketRoom` tests use a `FakePeer` so we don't have to bind uWebSockets
-  inside the test runner
-- `node:test` is run via `tsx --test --test-force-exit` because the asset
-  server keeps a watcher alive between suites
+  inside the test runner.
+- Browser-only modules (`app/frontend/**`, `app/ui/**`) are excluded from
+  coverage. They want component tests via `render()` from `remix/ui/test`,
+  which haven't been added yet.
 
 ## Build-Out Notes
 
