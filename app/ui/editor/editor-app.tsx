@@ -23,7 +23,12 @@ export const EditorApp = clientEntry(
     // until we know we are in the browser.
     const isBrowser = typeof window !== 'undefined'
 
-    let user: User | null = null
+    // In discord mode the identity is available in props during SSR, so seed
+    // it eagerly. Otherwise the SSR/hydration trees have different shapes
+    // (no `<span>` badge during SSR, one after hydration) and the reconciler
+    // can leave the SSR sign-out form orphaned alongside the new tree.
+    const authModeProp = handle.props.authMode
+    let user: User | null = authModeProp.mode === 'discord' ? authModeProp.identity : null
     let socket: SocketHandler | null = null
     let editor: CollaborativeEditor | null = null
     let editorElement: HTMLElement | null = null
@@ -121,8 +126,9 @@ export const EditorApp = clientEntry(
     }
 
     if (isBrowser) {
-      const authMode = handle.props.authMode
-      user = authMode.mode === 'discord' ? authMode.identity : getUser()
+      // Anonymous identity lives in localStorage, so it can only be resolved
+      // in the browser. Discord identity was already seeded above.
+      if (authModeProp.mode === 'anonymous') user = getUser()
       socket = new SocketHandler({
         onFileListUpdate: (next) => {
           files = next
@@ -141,7 +147,7 @@ export const EditorApp = clientEntry(
         },
         onError: showToast,
       })
-      socket.setUser(user)
+      if (user) socket.setUser(user)
       awarenessStates = socket.getAllAwarenessStates()
 
       handle.signal.addEventListener('abort', () => {

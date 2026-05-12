@@ -186,6 +186,43 @@ describe('auth controller', () => {
     assert.match(newCookie, /marky\.session=/)
   })
 
+  it('GET / in discord mode renders exactly one sign-out form', async () => {
+    const sessionStorage = createMemorySessionStorage()
+    const config = loadConfig(VALID_DISCORD_ENV)
+    if (config.auth.mode !== 'discord') throw new Error('test setup wrong')
+    const sessionCookie = makeSessionCookie(config.auth.sessionSecret)
+    const router = buildTestRouter({ config, sessionStorage, sessionCookie })
+
+    const seed = await sessionStorage.read(null)
+    seed.set('identity', { discordId: '1', name: 'tester', color: '#abcdef' })
+    const sessionId = await sessionStorage.save(seed)
+    assert.ok(sessionId)
+    const cookieHeader = await sessionCookie.serialize(sessionId)
+
+    const response = await router.fetch(
+      new Request('http://localhost/', { headers: { cookie: cookieHeader } }),
+    )
+    assert.equal(response.status, 200)
+    const html = await response.text()
+
+    const signOutForms = html.match(/action="\/auth\/sign-out"/g) ?? []
+    assert.equal(
+      signOutForms.length,
+      1,
+      `expected exactly one sign-out form, got ${signOutForms.length}: ${html.slice(0, 500)}`,
+    )
+
+    // Also assert there's only one Sign out button label, so a future bug
+    // that renders a duplicate button (without a duplicate form) still fails.
+    const signOutButtons = html.match(/>Sign out</g) ?? []
+    assert.equal(signOutButtons.length, 1)
+
+    // The user badge has to be SSR'd too, otherwise hydration changes the
+    // header tree shape and the reconciler ends up with a duplicate sign-out
+    // form. The actual symptom we hit in prod was two buttons in the bar.
+    assert.match(html, /tester/, 'discord identity should be SSR-rendered in the header')
+  })
+
   it('POST /auth/sign-out unsets identity and redirects to /', async () => {
     const sessionStorage = createMemorySessionStorage()
     const config = loadConfig(VALID_DISCORD_ENV)
