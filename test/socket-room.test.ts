@@ -660,6 +660,83 @@ describe('SocketRoom', () => {
     assert.equal(fake.commits[0].message, 'rename old.md → new.md — Anonymous Tester')
   })
 
+  it('rebinds the subdoc broadcaster to newName after rename', async () => {
+    const room = new SocketRoom({ store })
+    const editor = new FakePeer()
+    const observer = new FakePeer()
+    room.addPeer(editor)
+    room.addPeer(observer)
+
+    await room.receive(editor, encodeMessage(MESSAGE_TYPE_OPEN_FILE, encodeUtf8('old.md')))
+    await room.receive(observer, encodeMessage(MESSAGE_TYPE_OPEN_FILE, encodeUtf8('old.md')))
+
+    await room.receive(editor, encodeRenameFrame('old.md', 'new.md'))
+
+    // After rename, the observer's subscription has been migrated to newName,
+    // so an edit on the migrated subdoc must broadcast under newName.
+    observer.received.length = 0
+    const subdoc = room.filenameToSubdoc.get('new.md')!
+    subdoc.transact(() => {
+      const fragment = subdoc.getXmlFragment(PROSEMIRROR_FRAGMENT_NAME)
+      prosemirrorToYXmlFragment(textToDoc('post-rename edit'), fragment)
+    }, editor)
+
+    const frames = observer.framesOfType(MESSAGE_TYPE_SUBDOC_SYNC)
+    assert.ok(frames.length > 0, 'observer should receive a sync frame after rename')
+    for (const frame of frames) {
+      const { filename } = decodeFileMessage(frame.subarray(1))
+      assert.equal(filename, 'new.md', 'broadcast must use the new filename')
+    }
+  })
+
+  it('does not broadcast under the OLD name after rename', async () => {
+    const room = new SocketRoom({ store })
+    const editor = new FakePeer()
+    const observer = new FakePeer()
+    room.addPeer(editor)
+    room.addPeer(observer)
+
+    await room.receive(editor, encodeMessage(MESSAGE_TYPE_OPEN_FILE, encodeUtf8('old.md')))
+    await room.receive(observer, encodeMessage(MESSAGE_TYPE_OPEN_FILE, encodeUtf8('old.md')))
+    await room.receive(editor, encodeRenameFrame('old.md', 'new.md'))
+
+    observer.received.length = 0
+    const subdoc = room.filenameToSubdoc.get('new.md')!
+    subdoc.transact(() => {
+      const fragment = subdoc.getXmlFragment(PROSEMIRROR_FRAGMENT_NAME)
+      prosemirrorToYXmlFragment(textToDoc('post-rename edit'), fragment)
+    }, editor)
+
+    for (const frame of observer.framesOfType(MESSAGE_TYPE_SUBDOC_SYNC)) {
+      const { filename } = decodeFileMessage(frame.subarray(1))
+      assert.notEqual(filename, 'old.md', 'no stale broadcast under the old name')
+    }
+  })
+
+  it('reload from disk happens again after a delete-then-recreate cycle', async () => {
+    await store.write('reborn.md', 'first content')
+    await room.rescan()
+
+    const peer = new FakePeer()
+    room.addPeer(peer)
+
+    // Open, then delete.
+    await room.receive(peer, encodeMessage(MESSAGE_TYPE_OPEN_FILE, encodeUtf8('reborn.md')))
+    await room.receive(peer, encodeMessage(MESSAGE_TYPE_DELETE_FILE, encodeUtf8('reborn.md')))
+    assert.equal(room.filenameToSubdoc.has('reborn.md'), false)
+
+    // Re-write a new file at the same path. Opening it should now seed from
+    // the new disk content (the old subdoc's "loaded" tracking has to have
+    // been cleared on delete).
+    await store.write('reborn.md', 'second content')
+    await room.receive(peer, encodeMessage(MESSAGE_TYPE_OPEN_FILE, encodeUtf8('reborn.md')))
+
+    const subdoc = room.filenameToSubdoc.get('reborn.md')!
+    const fragment = subdoc.getXmlFragment(PROSEMIRROR_FRAGMENT_NAME)
+    assert.equal(fragment.toString().includes('second content'), true)
+    assert.equal(fragment.toString().includes('first content'), false)
+  })
+
   it('attachPushTimer stores the timer and dispose clears it', async () => {
     const room = new SocketRoom({ store })
     let cleared = false
