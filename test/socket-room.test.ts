@@ -1,8 +1,8 @@
-import * as assert from 'node:assert/strict'
+import * as assert from 'remix/assert'
 import * as fs from 'node:fs/promises'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import { afterEach, beforeEach, describe, it } from 'node:test'
+import { afterEach, beforeEach, describe, it } from 'remix/test'
 
 import * as Y from 'yjs'
 
@@ -314,7 +314,7 @@ describe('SocketRoom', () => {
   })
 
   it('commits a single editor after the debounce window elapses', async (t) => {
-    t.mock.timers.enable({ apis: ['setTimeout'] })
+    const timers = t.useFakeTimers()
 
     const fake = new FakeGitStore()
     ;(fake as any).repoDir = store.dir
@@ -336,7 +336,7 @@ describe('SocketRoom', () => {
       encodeFileMessage(MESSAGE_TYPE_SUBDOC_SYNC, 'hello.md', new Uint8Array([0])),
     )
 
-    t.mock.timers.tick(1001)
+    timers.advance(1001)
     await room.waitForFlushes()
 
     assert.equal(fake.commits.length, 1)
@@ -345,7 +345,7 @@ describe('SocketRoom', () => {
   })
 
   it('joins multiple editor names alphabetically in the commit message', async (t) => {
-    t.mock.timers.enable({ apis: ['setTimeout'] })
+    const timers = t.useFakeTimers()
 
     const fake = new FakeGitStore()
     ;(fake as any).repoDir = store.dir
@@ -367,14 +367,14 @@ describe('SocketRoom', () => {
     await room.receive(a, encodeFileMessage(MESSAGE_TYPE_SUBDOC_SYNC, 'shared.md', new Uint8Array([0])))
     await room.receive(b, encodeFileMessage(MESSAGE_TYPE_SUBDOC_SYNC, 'shared.md', new Uint8Array([0])))
 
-    t.mock.timers.tick(1001)
+    timers.advance(1001)
     await room.waitForFlushes()
 
     assert.equal(fake.commits[0].message, 'edit shared.md — alex, tim')
   })
 
   it('runs an independent debounce timer per file', async (t) => {
-    t.mock.timers.enable({ apis: ['setTimeout'] })
+    const timers = t.useFakeTimers()
 
     const fake = new FakeGitStore()
     ;(fake as any).repoDir = store.dir
@@ -397,7 +397,7 @@ describe('SocketRoom', () => {
       )
     }
 
-    t.mock.timers.tick(1001)
+    timers.advance(1001)
     await room.waitForFlushes()
 
     assert.equal(fake.commits.length, 2)
@@ -406,7 +406,7 @@ describe('SocketRoom', () => {
   })
 
   it('persists to disk without committing when gitStore is absent', async (t) => {
-    t.mock.timers.enable({ apis: ['setTimeout'] })
+    const timers = t.useFakeTimers()
 
     const room = new SocketRoom({ store, persistIdleMs: 1000 })
 
@@ -420,7 +420,7 @@ describe('SocketRoom', () => {
       encodeFileMessage(MESSAGE_TYPE_SUBDOC_SYNC, 'hello.md', new Uint8Array([0])),
     )
 
-    t.mock.timers.tick(1001)
+    timers.advance(1001)
     await room.waitForFlushes()
 
     // The file exists on disk after the flush (ContentStore created it on open).
@@ -429,7 +429,7 @@ describe('SocketRoom', () => {
   })
 
   it('renames a subdoc in-memory and on disk, then schedules a rename commit', async (t) => {
-    t.mock.timers.enable({ apis: ['setTimeout'] })
+    const timers = t.useFakeTimers()
 
     const fake = new FakeGitStore()
     ;(fake as any).repoDir = store.dir
@@ -450,7 +450,7 @@ describe('SocketRoom', () => {
     assert.equal(await store.read('old.md'), null)
     assert.equal(await store.read('new.md'), '')
 
-    t.mock.timers.tick(1001)
+    timers.advance(1001)
     await room.waitForFlushes()
 
     assert.equal(fake.commits.length, 1)
@@ -478,7 +478,7 @@ describe('SocketRoom', () => {
   })
 
   it('collapses edit-then-rename into one rename commit with both editors', async (t) => {
-    t.mock.timers.enable({ apis: ['setTimeout'] })
+    const timers = t.useFakeTimers()
 
     const fake = new FakeGitStore()
     ;(fake as any).repoDir = store.dir
@@ -503,7 +503,7 @@ describe('SocketRoom', () => {
     )
     await room.receive(renamer, encodeRenameFrame('old.md', 'new.md'))
 
-    t.mock.timers.tick(1001)
+    timers.advance(1001)
     await room.waitForFlushes()
 
     assert.equal(fake.commits.length, 1)
@@ -512,7 +512,7 @@ describe('SocketRoom', () => {
   })
 
   it('deletes a file and schedules a delete commit', async (t) => {
-    t.mock.timers.enable({ apis: ['setTimeout'] })
+    const timers = t.useFakeTimers()
 
     const fake = new FakeGitStore()
     ;(fake as any).repoDir = store.dir
@@ -535,7 +535,7 @@ describe('SocketRoom', () => {
     const list = peer.lastFrameOfType(MESSAGE_TYPE_FILE_LIST)
     assert.ok(list)
 
-    t.mock.timers.tick(1001)
+    timers.advance(1001)
     await room.waitForFlushes()
 
     assert.equal(fake.commits.length, 1)
@@ -544,7 +544,7 @@ describe('SocketRoom', () => {
   })
 
   it('collapses rename-then-delete into a single delete commit', async (t) => {
-    t.mock.timers.enable({ apis: ['setTimeout'] })
+    const timers = t.useFakeTimers()
 
     const fake = new FakeGitStore()
     ;(fake as any).repoDir = store.dir
@@ -560,7 +560,7 @@ describe('SocketRoom', () => {
     await room.receive(peer, encodeRenameFrame('a.md', 'b.md'))
     await room.receive(peer, encodeMessage(MESSAGE_TYPE_DELETE_FILE, encodeUtf8('b.md')))
 
-    t.mock.timers.tick(1001)
+    timers.advance(1001)
     await room.waitForFlushes()
 
     assert.equal(fake.commits.length, 1)
@@ -582,7 +582,7 @@ describe('SocketRoom', () => {
   })
 
   it('dispose clears flush timers and pending ops', async (t) => {
-    t.mock.timers.enable({ apis: ['setTimeout'] })
+    const timers = t.useFakeTimers()
 
     const room = new SocketRoom({ store, persistIdleMs: 1000 })
     const peer = new FakePeer()
@@ -599,13 +599,13 @@ describe('SocketRoom', () => {
     await room.dispose()
 
     // After dispose, no more timers; advancing the clock does nothing.
-    t.mock.timers.tick(10_000)
+    timers.advance(10_000)
     await new Promise<void>((r) => setImmediate(r))
     // No assertion needed — we just want dispose() to complete without throwing.
   })
 
   it('captures the editor name before destroying state on delete', async (t) => {
-    t.mock.timers.enable({ apis: ['setTimeout'] })
+    const timers = t.useFakeTimers()
 
     const fake = new FakeGitStore()
     ;(fake as any).repoDir = store.dir
@@ -626,7 +626,7 @@ describe('SocketRoom', () => {
 
     await room.receive(peer, encodeMessage(MESSAGE_TYPE_DELETE_FILE, encodeUtf8('to-delete.md')))
 
-    t.mock.timers.tick(1001)
+    timers.advance(1001)
     await room.waitForFlushes()
 
     assert.equal(fake.commits.length, 1)
@@ -635,7 +635,7 @@ describe('SocketRoom', () => {
   })
 
   it('captures the editor name before destroying state on rename', async (t) => {
-    t.mock.timers.enable({ apis: ['setTimeout'] })
+    const timers = t.useFakeTimers()
 
     const fake = new FakeGitStore()
     ;(fake as any).repoDir = store.dir
@@ -653,7 +653,7 @@ describe('SocketRoom', () => {
 
     await room.receive(peer, encodeRenameFrame('old.md', 'new.md'))
 
-    t.mock.timers.tick(1001)
+    timers.advance(1001)
     await room.waitForFlushes()
 
     assert.equal(fake.commits.length, 1)

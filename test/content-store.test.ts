@@ -1,8 +1,8 @@
-import * as assert from 'node:assert/strict'
+import * as assert from 'remix/assert'
 import * as fs from 'node:fs/promises'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import { afterEach, beforeEach, describe, it } from 'node:test'
+import { afterEach, beforeEach, describe, it } from 'remix/test'
 
 import { ContentStore } from '../app/data/content-store.ts'
 

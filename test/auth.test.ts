@@ -1,5 +1,5 @@
-import * as assert from 'node:assert/strict'
-import { afterEach, beforeEach, describe, it } from 'node:test'
+import * as assert from 'remix/assert'
+import { afterEach, beforeEach, describe, it } from 'remix/test'
 
 import { createCookie } from 'remix/cookie'
 import { createMemorySessionStorage } from 'remix/session/memory-storage'
