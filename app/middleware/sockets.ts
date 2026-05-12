@@ -84,6 +84,10 @@ export class SocketRoom {
   private readonly filesMap: Y.Map<Y.Doc>
   readonly filenameToSubdoc = new Map<string, Y.Doc>()
   readonly filenameToSubdocAwareness = new Map<string, Awareness>()
+  // Subdocs that have already been seeded with disk content. Re-opening a file
+  // (e.g. after a rename) must NOT wipe and reload from disk — that would
+  // destroy any unflushed in-memory edits.
+  private readonly loadedFromDisk = new Set<string>()
   private readonly subdocBroadcastHandlers = new Map<Y.Doc, (update: Uint8Array) => void>()
   private readonly peers = new Map<PeerConnection, PeerState>()
   private readonly pendingOps = new Map<string, PendingOp>()
@@ -130,6 +134,7 @@ export class SocketRoom {
         this.filesMap.delete(filename)
         this.filenameToSubdoc.delete(filename)
         this.filenameToSubdocAwareness.delete(filename)
+        this.loadedFromDisk.delete(filename)
       }
     }
   }
@@ -224,6 +229,7 @@ export class SocketRoom {
       this.filenameToSubdoc.set(newName, subdoc)
       this.filesMap.delete(oldName)
       this.filesMap.set(newName, subdoc)
+      if (this.loadedFromDisk.delete(oldName)) this.loadedFromDisk.add(newName)
       const awareness = this.filenameToSubdocAwareness.get(oldName)
       if (awareness) {
         this.filenameToSubdocAwareness.delete(oldName)
@@ -269,6 +275,7 @@ export class SocketRoom {
       this.filenameToSubdoc.delete(filename)
       this.filesMap.delete(filename)
       this.filenameToSubdocAwareness.delete(filename)
+      this.loadedFromDisk.delete(filename)
       this.subdocBroadcastHandlers.delete(subdoc)
       for (const state of this.peers.values()) state.subscriptions.delete(filename)
 
@@ -367,11 +374,16 @@ export class SocketRoom {
   }
 
   private async loadFileIntoSubdoc(filename: string, subdoc: Y.Doc): Promise<void> {
+    // Only seed a subdoc once. Calling this on every OPEN_FILE would wipe
+    // unflushed in-memory edits whenever a client re-opens the file (which
+    // the editor does after a rename, and after any tab switch back).
+    if (this.loadedFromDisk.has(filename)) return
     const content = await this.store.readOrCreate(filename)
     const doc = textToDoc(content)
     const fragment = subdoc.getXmlFragment(PROSEMIRROR_FRAGMENT_NAME)
     fragment.delete(0, fragment.length)
     prosemirrorToYXmlFragment(doc, fragment)
+    this.loadedFromDisk.add(filename)
   }
 
   private async persistSubdocToDisk(filename: string, subdoc: Y.Doc): Promise<boolean> {
