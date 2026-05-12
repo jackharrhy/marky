@@ -8,12 +8,16 @@ const config: RemixTestConfig = {
   coverage: {
     dir: '.coverage',
     include: ['app/**/*.{ts,tsx}'],
-    // Browser-only modules (app/frontend, app/ui) are hydrated in the browser
-    // and aren't unit-tested at the server-test layer. They want component
-    // tests via `render()` from remix/ui/test, which we don't have yet.
+    // Browser-only modules that need a DOM (CollaborativeEditor / user.ts /
+    // the editor UI) aren't unit-tested at the server-test layer. They want
+    // component tests via `render()` from remix/ui/test which requires a
+    // headless browser — not worth the complexity for this project right now.
+    // SocketHandler is browser-targeted but has no DOM dependency, so it
+    // stays in the coverage report.
     exclude: [
       'app/**/*.test.{ts,tsx}',
-      'app/frontend/**',
+      'app/frontend/collaborative-editor.ts',
+      'app/frontend/user.ts',
       'app/ui/**',
       'app/assets/**',
     ],

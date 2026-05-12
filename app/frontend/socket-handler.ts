@@ -40,10 +40,30 @@ export interface AwarenessClientState {
   currentFile?: string | null
 }
 
+// Minimal WebSocket-shaped interface so SocketHandler can run against a fake
+// transport in unit tests. The real browser WebSocket satisfies this trivially.
+// `send` and `addEventListener` are intentionally typed as `any` to stay
+// structurally compatible with both the lib.dom WebSocket and a hand-rolled
+// fake transport in tests.
+export interface SocketHandlerTransport {
+  readyState: number
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  send(data: any): void
+  close(): void
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  addEventListener(type: string, listener: any): void
+}
+
+export interface SocketHandlerOptions extends SocketHandlerCallbacks {
+  // Optional transport injection. When omitted, SocketHandler connects to
+  // `/ws` on the current host. Tests pass a fake transport.
+  socket?: SocketHandlerTransport
+}
+
 // Browser-side counterpart to app/middleware/sockets.ts. Owns the websocket,
 // the root Yjs doc, and the per-file subdoc/awareness maps.
 export class SocketHandler {
-  private readonly ws: WebSocket
+  private readonly ws: SocketHandlerTransport
   private readonly callbacks: SocketHandlerCallbacks
   readonly rootDoc: Y.Doc
   private readonly filesMap: Y.Map<Y.Doc>
@@ -51,22 +71,28 @@ export class SocketHandler {
   private readonly filenameToSubdoc = new Map<string, Y.Doc>()
   private readonly filenameToSubdocAwareness = new Map<string, Awareness>()
 
-  constructor(callbacks: SocketHandlerCallbacks) {
+  constructor(options: SocketHandlerOptions) {
+    const { socket, ...callbacks } = options
     this.callbacks = callbacks
     this.rootDoc = new Y.Doc()
     this.filesMap = this.rootDoc.getMap('files')
     this.awareness = new Awareness(this.rootDoc)
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    this.ws = new WebSocket(`${protocol}//${window.location.host}/ws`)
-    this.ws.binaryType = 'arraybuffer'
+    if (socket) {
+      this.ws = socket
+    } else {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      const ws = new WebSocket(`${protocol}//${window.location.host}/ws`)
+      ws.binaryType = 'arraybuffer'
+      this.ws = ws
+    }
 
     this.ws.addEventListener('open', () => this.handleOpen())
     this.ws.addEventListener('close', () => this.handleClose())
-    this.ws.addEventListener('error', (event) =>
+    this.ws.addEventListener('error', (event: unknown) =>
       console.error('marky: websocket error', event),
     )
-    this.ws.addEventListener('message', (event) => {
+    this.ws.addEventListener('message', (event: { data: unknown }) => {
       this.handleMessage(event).catch((error) =>
         console.error('marky: failed to handle ws message', error),
       )
@@ -144,7 +170,8 @@ export class SocketHandler {
   }
 
   close(): void {
-    if (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING) {
+    // WebSocket readyState values: 0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED.
+    if (this.ws.readyState === 0 || this.ws.readyState === 1) {
       this.ws.close()
     }
   }
@@ -152,7 +179,8 @@ export class SocketHandler {
   // ---- Internals ------------------------------------------------------------
 
   private send(frame: Uint8Array): void {
-    if (this.ws.readyState === WebSocket.OPEN) {
+    // readyState 1 = OPEN; see comment in close() above.
+    if (this.ws.readyState === 1) {
       // The browser WebSocket types disagree with `Uint8Array<ArrayBufferLike>`
       // under strict TS; copy into a fresh ArrayBuffer-backed view to satisfy
       // them while keeping our wire helpers working with shared buffers.
@@ -193,9 +221,11 @@ export class SocketHandler {
     this.awareness.setLocalState(null)
   }
 
-  private async handleMessage(event: MessageEvent): Promise<void> {
-    const data =
-      event.data instanceof Blob ? await event.data.arrayBuffer() : (event.data as ArrayBuffer)
+  private async handleMessage(event: { data: unknown }): Promise<void> {
+    const data: ArrayBuffer | Uint8Array =
+      typeof Blob !== 'undefined' && event.data instanceof Blob
+        ? await event.data.arrayBuffer()
+        : (event.data as ArrayBuffer | Uint8Array)
     const bytes = toUint8(data)
     if (bytes.length === 0) return
 
