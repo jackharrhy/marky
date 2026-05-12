@@ -165,6 +165,69 @@ describe('SocketRoom', () => {
     assert.equal(fragment.toString().includes('persisted body'), true)
   })
 
+  it('preserves in-memory subdoc content when the same file is opened again', async () => {
+    // Regression: previously OPEN_FILE always wiped the fragment and reloaded
+    // from disk, which destroyed unflushed edits whenever the client re-opened
+    // a file (notably after a rename — the new name is OPEN_FILE'd by the
+    // client but its subdoc already holds the user's in-memory edits).
+    await store.write('notes.md', 'persisted body')
+    await room.rescan()
+
+    const peer = new FakePeer()
+    room.addPeer(peer)
+    await room.receive(peer, encodeMessage(MESSAGE_TYPE_OPEN_FILE, encodeUtf8('notes.md')))
+
+    // Simulate an edit that has not been flushed to disk yet.
+    const subdoc = room.filenameToSubdoc.get('notes.md')!
+    subdoc.transact(() => {
+      const fragment = subdoc.getXmlFragment(PROSEMIRROR_FRAGMENT_NAME)
+      fragment.delete(0, fragment.length)
+      prosemirrorToYXmlFragment(textToDoc('important unsaved edit'), fragment)
+    }, peer)
+
+    // Disk still has the original content.
+    assert.equal(await store.read('notes.md'), 'persisted body')
+
+    // Re-open the file. The subdoc must keep its in-memory state.
+    await room.receive(peer, encodeMessage(MESSAGE_TYPE_OPEN_FILE, encodeUtf8('notes.md')))
+
+    const fragment = subdoc.getXmlFragment(PROSEMIRROR_FRAGMENT_NAME)
+    assert.equal(
+      fragment.toString().includes('important unsaved edit'),
+      true,
+      'subdoc content should be preserved across re-opens',
+    )
+  })
+
+  it('preserves in-memory content when the renamed file is opened again', async () => {
+    // End-to-end regression matching what the client does on rename: it
+    // optimistically marks the file as current and the user clicks it,
+    // which sends OPEN_FILE for newName. The subdoc was migrated server-side
+    // and holds the user's unflushed edits; reopening must not clobber them.
+    const room = new SocketRoom({ store })
+    const peer = new FakePeer()
+    room.addPeer(peer)
+
+    await room.receive(peer, encodeMessage(MESSAGE_TYPE_OPEN_FILE, encodeUtf8('old.md')))
+
+    const subdoc = room.filenameToSubdoc.get('old.md')!
+    subdoc.transact(() => {
+      const fragment = subdoc.getXmlFragment(PROSEMIRROR_FRAGMENT_NAME)
+      prosemirrorToYXmlFragment(textToDoc('first sentence after creation'), fragment)
+    }, peer)
+
+    await room.receive(peer, encodeRenameFrame('old.md', 'new.md'))
+    await room.receive(peer, encodeMessage(MESSAGE_TYPE_OPEN_FILE, encodeUtf8('new.md')))
+
+    const migrated = room.filenameToSubdoc.get('new.md')!
+    const fragment = migrated.getXmlFragment(PROSEMIRROR_FRAGMENT_NAME)
+    assert.equal(
+      fragment.toString().includes('first sentence after creation'),
+      true,
+      'renamed subdoc should keep its content when reopened',
+    )
+  })
+
   it('broadcasts subdoc edits to subscribed peers', async () => {
     await store.write('shared.md', '')
     await room.rescan()
