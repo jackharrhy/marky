@@ -66,14 +66,25 @@ export class GitStore {
   }
 
   async commit(message: string): Promise<CommitResult | null> {
-    // Look at the staged index only — unstaged edits in the working tree
+    // Look at the staged index only. Unstaged edits in the working tree
     // do not produce a commit even though we're using `git commit` (no
     // `-a`). If nothing is staged, simple-git returns a commit object
     // with empty `commit` and `summary.changes === 0`; treat that as
     // "nothing to commit" and return null.
-    const result = await this.git.commit(message, {
-      '--author': `${this.authorName} <${this.authorEmail}>`,
-    })
+    //
+    // We have to set BOTH author and committer identity. --author covers
+    // the author field but git also needs user.name / user.email for the
+    // committer, otherwise it fails with "Please tell me who you are."
+    // when no global git config exists (e.g. inside the production
+    // container). Use per-call `-c` flags so we don't mutate .git/config.
+    const result = await this.git
+      .env({
+        GIT_AUTHOR_NAME: this.authorName,
+        GIT_AUTHOR_EMAIL: this.authorEmail,
+        GIT_COMMITTER_NAME: this.authorName,
+        GIT_COMMITTER_EMAIL: this.authorEmail,
+      })
+      .commit(message)
     if (!result.commit) return null
     return { sha: result.commit }
   }

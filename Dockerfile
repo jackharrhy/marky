@@ -29,6 +29,13 @@ ENV NODE_ENV=production \
 
 WORKDIR /app
 
+# simple-git shells out to the system `git` binary, which the slim node image
+# does not include. Install it (and ca-certificates so HTTPS pushes can verify
+# the GitHub cert chain).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copy dependencies and source.
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json package-lock.json ./
