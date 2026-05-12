@@ -186,6 +186,61 @@ describe('auth controller', () => {
     assert.match(newCookie, /marky\.session=/)
   })
 
+  it('rejects a replayed OAuth state after a successful callback', async () => {
+    // Once /auth/callback consumes a state, the second attempt to use it
+    // must fail. Otherwise an attacker who captured a victim's redirect URL
+    // could replay it to get a fresh session.
+    globalThis.fetch = (async (input) => {
+      const url = typeof input === 'string' ? input : (input as URL | Request).toString()
+      if (url.endsWith('/oauth2/token')) {
+        return new Response(
+          JSON.stringify({ access_token: 't', token_type: 'Bearer', expires_in: 100 }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        )
+      }
+      if (url.includes('/users/@me/guilds/')) {
+        return new Response(
+          JSON.stringify({
+            nick: 'Replay',
+            roles: [],
+            user: { id: '1234', username: 'replay', global_name: null },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        )
+      }
+      throw new Error(`unexpected fetch ${url}`)
+    }) as typeof fetch
+
+    const sessionStorage = createMemorySessionStorage()
+    const sessionCookie = makeSessionCookie('test-secret')
+    const router = buildTestRouter({
+      config: loadConfig(VALID_DISCORD_ENV),
+      sessionStorage,
+      sessionCookie,
+    })
+
+    const start = await router.fetch(new Request('http://localhost/auth/sign-in'))
+    const cookieHeader = setCookieHeaderToCookie(start.headers.get('set-cookie')!)
+    const state = start.headers.get('location')!.match(/state=([0-9a-f]{64})/)![1]
+
+    // First callback: succeeds.
+    const first = await router.fetch(
+      new Request(`http://localhost/auth/callback?code=abc&state=${state}`, {
+        headers: { cookie: cookieHeader },
+      }),
+    )
+    assert.equal(first.status, 302)
+
+    // Second callback with the SAME state on the SAME pre-callback cookie:
+    // the state has been unset, so this must 400.
+    const replay = await router.fetch(
+      new Request(`http://localhost/auth/callback?code=abc&state=${state}`, {
+        headers: { cookie: cookieHeader },
+      }),
+    )
+    assert.equal(replay.status, 400)
+  })
+
   it('GET / in discord mode renders exactly one sign-out form', async () => {
     const sessionStorage = createMemorySessionStorage()
     const config = loadConfig(VALID_DISCORD_ENV)
