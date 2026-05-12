@@ -157,6 +157,6 @@ app/
   ui/editor/                    editor page + EditorApp client entry
   utils/render.tsx              JSX -> HTML response
 content/                        markdown files (gitignored)
-test/                           node:test suites
+test/                           remix/test suites
 server.ts                       boots Remix + attaches WebSocket
 ```
